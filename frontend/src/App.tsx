@@ -1,0 +1,396 @@
+import { useState, useEffect } from 'react';
+import { Sidebar } from './components/Sidebar';
+import { SubAgentChip } from './components/SubAgentChip';
+import { SkillChip } from './components/SkillChip';
+import { InputBar } from './components/InputBar';
+import type { ModelOption } from './components/InputBar';
+import { EvidenceDrawer } from './components/EvidenceDrawer';
+import { ModelSettingsModal } from './components/ModelSettingsModal';
+import { SubagentsModal } from './components/SubagentsModal';
+import { SkillsModal } from './components/SkillsModal';
+import { AgentInspectorDrawer } from './components/AgentInspectorDrawer';
+import { ThinkingBlock } from './components/ThinkingBlock';
+import { MarkdownRenderer } from './components/MarkdownRenderer';
+import { useResearchStream } from './hooks/useResearchStream';
+import type {
+  ResearchRun,
+  ProviderConfig,
+  ModelItem,
+  AttachedFile,
+  SubAgentEvent,
+  SkillEvent,
+} from './types';
+import { Sparkles, Layers, Sliders, Bot, Wand2 } from 'lucide-react';
+
+const FALLBACK_MODELS: ModelOption[] = [
+  { id: 'auto/qwen', name: 'auto/qwen', provider: 'localhost', providerLabel: 'Localhost', tags: ['1M', 'Fast'] },
+  { id: 'auto/coding', name: 'auto/coding', provider: 'localhost', providerLabel: 'Localhost', tags: ['Coding'] },
+  { id: 'auto/fast', name: 'auto/fast', provider: 'localhost', providerLabel: 'Localhost', tags: ['Fast'] },
+  { id: 'antigravity/gemini-3.8-flash-high', name: 'antigravity/gemini-3.8-flash-high', provider: 'localhost', providerLabel: 'Localhost', tags: ['1M', 'Vision'] },
+  { id: 'antigravity/claude-sonnet-4-6', name: 'antigravity/claude-sonnet-4-6', provider: 'localhost', providerLabel: 'Localhost', tags: ['1M'] },
+  { id: 'antigravity/claude-opus-4-6-thinking', name: 'antigravity/claude-opus-4-6-thinking', provider: 'localhost', providerLabel: 'Localhost', tags: ['Thinking'] },
+];
+
+export function App() {
+  const [isSidebarExpanded, setIsSidebarExpanded] = useState(false); // Collapsed icon rail by default like Gemini
+  const [isEvidenceOpen, setIsEvidenceOpen] = useState(false);
+  const [isVaultOpen, setIsVaultOpen] = useState(false);
+  const [isSubagentsOpen, setIsSubagentsOpen] = useState(false);
+  const [isSkillsOpen, setIsSkillsOpen] = useState(false);
+  const [inspectedEvent, setInspectedEvent] = useState<SubAgentEvent | SkillEvent | null>(null);
+
+  const [selectedModel, setSelectedModel] = useState('auto/qwen');
+  const [selectedProvider, setSelectedProvider] = useState<string | undefined>('localhost');
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>(FALLBACK_MODELS);
+  const [runs, setRuns] = useState<ResearchRun[]>([]);
+
+  const {
+    isLoading,
+    isThinking,
+    currentPrompt,
+    timelineEvents,
+    streamedContent,
+    streamedThoughts,
+    evidenceItems,
+    error,
+    startStream,
+    resetChat,
+    loadRunHistory,
+  } = useResearchStream();
+
+  const fetchProvidersAndModels = async () => {
+    try {
+      const res = await fetch('/api/vault/providers');
+      const data = await res.json();
+      if (data.providers && Array.isArray(data.providers)) {
+        const loadedModels: ModelOption[] = [];
+        data.providers.forEach((prov: ProviderConfig) => {
+          if (prov.is_enabled && prov.models) {
+            prov.models.forEach((m: ModelItem) => {
+              if (m.is_enabled !== false) {
+                loadedModels.push({
+                  id: m.id,
+                  name: m.name || m.id,
+                  provider: prov.provider,
+                  providerLabel: prov.label || prov.provider,
+                  tags: m.tags || [],
+                });
+              }
+            });
+          }
+        });
+
+        if (loadedModels.length > 0) {
+          setAvailableModels(loadedModels);
+          if (!loadedModels.some((m) => m.id === selectedModel)) {
+            setSelectedModel(loadedModels[0].id);
+            setSelectedProvider(loadedModels[0].provider);
+          }
+        }
+      }
+
+      // Fetch recent runs
+      const runsRes = await fetch('/api/runs');
+      if (runsRes.ok) {
+        const runsData = await runsRes.json();
+        if (runsData.runs) setRuns(runsData.runs);
+      }
+    } catch (e) {
+      console.error('Error fetching providers & models', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchProvidersAndModels();
+  }, []);
+
+  const handleSuggestionClick = (prompt: string) => {
+    startStream(prompt, selectedModel, [], selectedProvider);
+  };
+
+  const handleModelChange = (model: string, provider?: string) => {
+    setSelectedModel(model);
+    setSelectedProvider(provider);
+  };
+
+  const handleDispatch = (
+    prompt: string,
+    model: string,
+    files: AttachedFile[],
+    provider?: string
+  ) => {
+    startStream(prompt, model, files, provider || selectedProvider);
+  };
+
+  return (
+    <div className="flex h-screen w-screen bg-[#131314] text-[#e3e3e3] overflow-hidden select-none font-sans">
+      {/* 1. Left Gemini Rail / Drawer */}
+      <Sidebar
+        isExpanded={isSidebarExpanded}
+        onToggle={() => setIsSidebarExpanded((prev) => !prev)}
+        onNewChat={resetChat}
+        onOpenVault={() => setIsVaultOpen(true)}
+        onOpenSubagents={() => setIsSubagentsOpen(true)}
+        onOpenSkills={() => setIsSkillsOpen(true)}
+        onToggleEvidence={() => setIsEvidenceOpen((prev) => !prev)}
+        runs={runs}
+        onSelectRun={(run) => {
+          loadRunHistory(run.id);
+        }}
+      />
+
+      {/* 2. Main Workbench Area */}
+      <main className="flex-1 flex flex-col h-full overflow-hidden relative ambient-glow">
+        {/* Top Header */}
+        <header className="h-12 border-b border-[#282a2c] px-4 flex items-center justify-between z-20 bg-[#131314]/60 backdrop-blur-md">
+          <div className="flex items-center space-x-3">
+            <span className="text-xs font-medium text-white truncate max-w-md">
+              {currentPrompt || 'Research Workbench'}
+            </span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#1e1f20] text-[#8e918f] border border-[#3c4043]">
+              SQLite FTS5
+            </span>
+          </div>
+
+          <div className="flex items-center space-x-2.5 text-xs">
+            {/* Subagents Button */}
+            <button
+              onClick={() => setIsSubagentsOpen(true)}
+              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-[#1e1f20] hover:bg-[#282a2c] border border-[#3c4043] text-zinc-300 hover:text-white transition-colors"
+              title="Manage Subagents"
+            >
+              <Bot className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-[11px] font-medium">Subagents</span>
+            </button>
+
+            {/* Skills Button */}
+            <button
+              onClick={() => setIsSkillsOpen(true)}
+              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-[#1e1f20] hover:bg-[#282a2c] border border-[#3c4043] text-zinc-300 hover:text-white transition-colors"
+              title="Manage Skills"
+            >
+              <Wand2 className="w-3.5 h-3.5 text-purple-400" />
+              <span className="text-[11px] font-medium">Skills</span>
+            </button>
+
+            {/* Model Settings Button */}
+            <button
+              onClick={() => setIsVaultOpen(true)}
+              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-[#1e1f20] hover:bg-[#282a2c] border border-[#3c4043] text-zinc-300 hover:text-white transition-colors"
+              title="Open Model Settings"
+            >
+              <Sliders className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-[11px] font-medium">Models</span>
+            </button>
+
+            {/* Endpoint Status Indicator */}
+            <div className="flex items-center space-x-1.5 text-[#8e918f] px-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="text-[11px] font-mono">ONLINE</span>
+            </div>
+
+            {/* Evidence Drawer Button */}
+            <button
+              onClick={() => setIsEvidenceOpen((prev) => !prev)}
+              className="px-2.5 py-1 rounded-full bg-[#1e1f20] hover:bg-[#282a2c] text-xs text-[#8e918f] hover:text-white border border-[#3c4043] transition-colors flex items-center space-x-1.5"
+            >
+              <Layers className="w-3.5 h-3.5 text-[#a8c7fa]" />
+              <span>Evidence</span>
+              {evidenceItems.length > 0 && (
+                <span className="px-1.5 py-0.2 bg-[#a8c7fa] text-[#040e29] rounded-full text-[10px] font-bold">
+                  {evidenceItems.length}
+                </span>
+              )}
+            </button>
+          </div>
+        </header>
+
+        {/* Dynamic Center Stage: Welcome Suggestions vs Chat Conversation */}
+        <div className="flex-1 overflow-y-auto px-4 py-8 flex flex-col justify-between">
+          {!currentPrompt && timelineEvents.length === 0 ? (
+            /* Welcome Hero & Quick Starts */
+            <div className="max-w-2xl mx-auto my-auto text-center space-y-6">
+              <div className="inline-flex p-3 rounded-2xl bg-gradient-to-tr from-[#1e1f20] to-[#282a2c] border border-[#3c4043] shadow-lg">
+                <Sparkles className="w-8 h-8 text-[#a8c7fa]" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-semibold text-white tracking-tight">
+                  Where research meets verified evidence
+                </h1>
+                <p className="text-sm text-[#8e918f] mt-2 max-w-lg mx-auto">
+                  Deconstruct hypotheses, challenge biases with an adversarial skeptic, and index
+                  verbatim evidence into SQLite FTS5 with zero vector database overhead.
+                </p>
+              </div>
+
+              {/* Research Prompts Suggestions */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-4 text-left">
+                <button
+                  onClick={() =>
+                    handleSuggestionClick(
+                      'Evaluate SQLite WAL mode concurrency guarantees for edge microservices'
+                    )
+                  }
+                  className="px-3.5 py-2 rounded-2xl bg-[#1e1f20] hover:bg-[#282a2c] text-xs text-[#e3e3e3] border border-[#3c4043] transition-all hover:scale-[1.02]"
+                >
+                  Evaluate SQLite WAL mode on edge devices
+                </button>
+                <button
+                  onClick={() =>
+                    handleSuggestionClick(
+                      'Analyze FTS5 lexical BM25 retrieval vs Vector DB memory footprint'
+                    )
+                  }
+                  className="px-3.5 py-2 rounded-2xl bg-[#1e1f20] hover:bg-[#282a2c] text-xs text-[#e3e3e3] border border-[#3c4043] transition-all hover:scale-[1.02]"
+                >
+                  FTS5 BM25 vs Vector DB memory footprint
+                </button>
+                <button
+                  onClick={() =>
+                    handleSuggestionClick(
+                      'Compare local Qwen/DeepSeek inference throughput with cloud APIs'
+                    )
+                  }
+                  className="px-3.5 py-2 rounded-2xl bg-[#1e1f20] hover:bg-[#282a2c] text-xs text-[#e3e3e3] border border-[#3c4043] transition-all hover:scale-[1.02]"
+                >
+                  Local model throughput vs Cloud APIs
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Active Chat & Agent Stream */
+            <div className="space-y-6 w-full max-w-3xl mx-auto pb-24">
+              {/* User Prompt Bubble */}
+              <div className="flex items-start justify-end">
+                <div className="max-w-xl bg-[#282a2c] text-white px-4 py-2.5 rounded-3xl text-sm leading-relaxed shadow-sm">
+                  {currentPrompt}
+                </div>
+              </div>
+
+              {/* Agent Execution Flow */}
+              <div className="space-y-3">
+                <div className="flex items-center space-x-2 text-xs text-[#8e918f] pb-1">
+                  <Sparkles className="w-4 h-4 text-[#a8c7fa]" />
+                  <span className="font-medium tracking-wide">
+                    RESEARCH PIPELINE TIMELINE (CLICK STEP TO INSPECT)
+                  </span>
+                </div>
+
+                <div className="space-y-2 border-l border-[#282a2c] pl-4 ml-2">
+                  {timelineEvents.map((evt, idx) => {
+                    if (evt.type === 'subagent') {
+                      return (
+                        <SubAgentChip
+                          key={idx}
+                          event={evt}
+                          onClick={() => setInspectedEvent(evt)}
+                        />
+                      );
+                    }
+                    if (evt.type === 'skill') {
+                      return (
+                        <SkillChip
+                          key={idx}
+                          event={evt}
+                          onClick={() => setInspectedEvent(evt)}
+                        />
+                      );
+                    }
+                    if (evt.type === 'evidence') {
+                      return (
+                        <div
+                          key={idx}
+                          className="p-3 bg-[#1e1f20] border border-[#3c4043] rounded-xl text-xs space-y-1"
+                        >
+                          <div className="flex items-center justify-between text-[#8e918f]">
+                            <span className="font-mono text-[10px] text-[#a8c7fa]">
+                              EVIDENCE PROVENANCE
+                            </span>
+                            <span className="text-[10px]">{evt.domain}</span>
+                          </div>
+                          <p className="text-[#c4c7c5] italic">"{evt.snippet}"</p>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })}
+                </div>
+              </div>
+
+              {/* Reliable Streaming Thinking Process Module */}
+              <ThinkingBlock thoughts={streamedThoughts} isStreaming={isThinking} />
+
+              {/* Real-time Synthesized Output */}
+              {streamedContent && (
+                  <div className="bg-[#1e1f20]/90 border border-[#3c4043] rounded-3xl p-6 shadow-xl relative backdrop-blur-md">
+                    <div className="flex items-center justify-between border-b border-[#282a2c] pb-3 mb-4">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-[#a8c7fa]">
+                        Synthesized Research Report
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#131314] text-[#8e918f] border border-[#3c4043]">
+                        Model: {selectedModel}
+                      </span>
+                    </div>
+
+                    <MarkdownRenderer content={streamedContent} />
+                  </div>
+              )}
+
+              {/* Error Alert */}
+              {error && (
+                <div className="p-4 bg-red-950/40 border border-red-800/80 rounded-2xl text-red-200 text-xs">
+                  {error}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 3. Bottom Input Bar with File Attachment, @ Mentions, and Model Selection */}
+        <InputBar
+          onDispatch={handleDispatch}
+          isLoading={isLoading}
+          selectedModel={selectedModel}
+          onModelChange={handleModelChange}
+          onToggleEvidence={() => setIsEvidenceOpen((prev) => !prev)}
+          availableModels={availableModels}
+        />
+      </main>
+
+      {/* 4. Slide-out Evidence Drawer */}
+      <EvidenceDrawer
+        isOpen={isEvidenceOpen}
+        onClose={() => setIsEvidenceOpen(false)}
+        evidence={evidenceItems}
+      />
+
+      {/* 5. SubAgent / Skill Inspector Drawer */}
+      <AgentInspectorDrawer
+        isOpen={Boolean(inspectedEvent)}
+        onClose={() => setInspectedEvent(null)}
+        event={inspectedEvent}
+      />
+
+      {/* 6. Subagents Management Modal */}
+      <SubagentsModal
+        isOpen={isSubagentsOpen}
+        onClose={() => setIsSubagentsOpen(false)}
+      />
+
+      {/* 7. Skills Management Modal */}
+      <SkillsModal
+        isOpen={isSkillsOpen}
+        onClose={() => setIsSkillsOpen(false)}
+      />
+
+      {/* 8. Model Settings & BYOK Vault Modal */}
+      <ModelSettingsModal
+        isOpen={isVaultOpen}
+        onClose={() => setIsVaultOpen(false)}
+        onProvidersUpdated={fetchProvidersAndModels}
+      />
+    </div>
+  );
+}
+
+export default App;

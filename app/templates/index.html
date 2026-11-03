@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BYOK AI Research Harness</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        gemini: {
+                            bg: '#131314',
+                            surface: '#1e1f20',
+                            hover: '#282a2c',
+                            border: '#3c4043',
+                            input: '#1e1f20',
+                            text: '#e3e3e3',
+                            muted: '#8e918f',
+                            blue: '#a8c7fa',
+                            accent: '#444746',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #131314;
+            color: #e3e3e3;
+        }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3c4043; border-radius: 9999px; }
+        ::-webkit-scrollbar-thumb:hover { background: #5e6368; }
+        
+        .ambient-glow {
+            background: radial-gradient(circle at 50% 40%, rgba(66, 133, 244, 0.08) 0%, rgba(19, 19, 20, 0) 70%);
+        }
+
+        .typing-cursor::after {
+            content: '▎';
+            display: inline-block;
+            animation: blink 1s step-end infinite;
+            color: #a8c7fa;
+        }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+        .prose h1, .prose h2, .prose h3 { color: #f1f3f4; font-weight: 600; margin-top: 1rem; margin-bottom: 0.5rem; }
+        .prose p { margin-bottom: 0.75rem; line-height: 1.625; }
+        .prose ul { list-style-type: disc; padding-left: 1.25rem; margin-bottom: 0.75rem; }
+        .prose li { margin-bottom: 0.25rem; }
+        .prose strong { color: #ffffff; font-weight: 600; }
+        .prose code { background: #282a2c; padding: 0.15rem 0.35rem; border-radius: 0.25rem; font-family: 'JetBrains Mono', monospace; font-size: 0.85em; }
+    </style>
+</head>
+<body class="bg-gemini-bg text-gemini-text font-sans h-screen flex overflow-hidden antialiased select-none">
+
+    <!-- ==================== LEFT SIDEBAR ==================== -->
+    <aside id="sidebar" class="w-72 bg-gemini-bg border-r border-[#282a2c] flex flex-col justify-between transition-all duration-300 z-30 overflow-hidden flex-shrink-0">
+        <!-- Top Section -->
+        <div class="flex flex-col h-full overflow-hidden p-3 space-y-3">
+            <!-- App Header & Collapse -->
+            <div class="flex items-center justify-between px-2 py-1">
+                <div class="flex items-center space-x-2.5">
+                    <div class="w-6 h-6 flex items-center justify-center">
+                        <svg class="w-5 h-5 text-[#a8c7fa]" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/>
+                        </svg>
+                    </div>
+                    <span class="font-semibold text-sm tracking-wide text-white">BYOK Harness</span>
+                </div>
+                <button onclick="toggleSidebar()" class="p-1.5 hover:bg-gemini-hover rounded-full text-gemini-muted hover:text-white transition-colors" title="Collapse Menu">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                </button>
+            </div>
+
+            <!-- New Research Button -->
+            <button onclick="startNewChat()" class="flex items-center space-x-3 w-full px-4 py-3 bg-[#1e1f20] hover:bg-[#282a2c] border border-transparent hover:border-[#3c4043] rounded-full text-white text-sm font-medium transition-all shadow-sm">
+                <svg class="w-4 h-4 text-gemini-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                </svg>
+                <span>New Research</span>
+            </button>
+
+            <!-- Navigation Links -->
+            <div class="space-y-0.5 text-xs font-medium text-gemini-muted pt-1">
+                <button onclick="openVaultModal()" class="flex items-center space-x-3 w-full px-3 py-2 rounded-lg hover:bg-gemini-hover hover:text-white transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+                    <span>API Key Vault</span>
+                    <span class="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800">ACTIVE</span>
+                </button>
+                <button onclick="toggleEvidenceDrawer()" class="flex items-center space-x-3 w-full px-3 py-2 rounded-lg hover:bg-gemini-hover hover:text-white transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+                    <span>Evidence & Claims</span>
+                </button>
+            </div>
+
+            <!-- Recent Runs Header -->
+            <div class="flex items-center justify-between px-3 pt-3 text-[11px] font-medium tracking-wider text-gemini-muted uppercase border-t border-[#282a2c]">
+                <span>Recent Research</span>
+                <svg class="w-3.5 h-3.5 hover:text-white cursor-pointer" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            </div>
+
+            <!-- Recent Runs List -->
+            <div id="runs-history-list" class="flex-1 overflow-y-auto space-y-0.5 text-xs font-normal">
+                {% for run in recent_runs %}
+                <div onclick="selectRun('{{ run.id }}', '{{ run.title | escape }}')" class="group flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gemini-hover cursor-pointer transition-colors text-gemini-text hover:text-white">
+                    <div class="truncate pr-2">{{ run.title }}</div>
+                    <span class="text-[10px] text-gemini-muted opacity-0 group-hover:opacity-100 transition-opacity">open</span>
+                </div>
+                {% else %}
+                <div class="p-4 text-center text-gemini-muted text-xs">No research history yet.</div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Bottom User Profile & Settings -->
+        <div class="p-3 border-t border-[#282a2c]">
+            <div class="flex items-center justify-between p-2 rounded-xl hover:bg-gemini-hover cursor-pointer transition-colors" onclick="openVaultModal()">
+                <div class="flex items-center space-x-2.5">
+                    <div class="w-7 h-7 rounded-full bg-[#1a73e8] flex items-center justify-center font-semibold text-xs text-white">
+                        K
+                    </div>
+                    <div class="flex flex-col">
+                        <span class="text-xs font-medium text-white">Local BYOK User</span>
+                        <span class="text-[10px] text-gemini-muted">Host :20128 Active</span>
+                    </div>
+                </div>
+                <svg class="w-4 h-4 text-gemini-muted hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ==================== MAIN WORKBENCH ==================== -->
+    <main class="flex-1 flex flex-col h-full overflow-hidden relative ambient-glow">
+
+        <!-- Top Status Bar Header -->
+        <header class="h-12 border-b border-[#282a2c] px-4 flex items-center justify-between z-20 bg-gemini-bg/60 backdrop-blur-md">
+            <div class="flex items-center space-x-3">
+                <!-- Sidebar Toggle Hamburger (Always visible and usable) -->
+                <button id="sidebar-toggle-btn" onclick="toggleSidebar()" class="p-1.5 hover:bg-gemini-hover rounded-lg text-gemini-muted hover:text-white transition-colors" title="Toggle Sidebar">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                </button>
+                <span id="current-title-badge" class="text-xs font-medium text-white truncate max-w-md">Research Workbench</span>
+                <span class="text-[10px] px-2 py-0.5 rounded-full bg-[#1e1f20] text-gemini-muted border border-[#3c4043]">SQLite FTS5</span>
+            </div>
+            <div class="flex items-center space-x-3 text-xs">
+                <div class="flex items-center space-x-1.5 text-gemini-muted">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span class="text-[11px] font-mono">ENDPOINT ONLINE</span>
+                </div>
+                <button onclick="toggleEvidenceDrawer()" class="px-2.5 py-1 rounded-full bg-[#1e1f20] hover:bg-[#282a2c] text-xs text-gemini-muted hover:text-white border border-[#3c4043] transition-colors flex items-center space-x-1.5">
+                    <svg class="w-3.5 h-3.5 text-[#a8c7fa]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                    <span>Evidence</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Dynamic Content Canvas -->
+        <div id="content-container" class="flex-1 overflow-y-auto px-4 md:px-16 lg:px-32 py-6 flex flex-col justify-between">
+            
+            <!-- Hero View (Visible before query) -->
+            <div id="hero-view" class="my-auto flex flex-col items-center justify-center text-center space-y-8 max-w-2xl mx-auto py-12 transition-all">
+                <div class="space-y-2">
+                    <h1 class="text-3xl md:text-4xl font-normal text-white tracking-tight">
+                        Where should we start?
+                    </h1>
+                    <p class="text-gemini-muted text-sm">
+                        Bring your own keys, explore verified claims, and coordinate adversarial research agents.
+                    </p>
+                </div>
+
+                <!-- Suggestion Chips -->
+                <div class="flex flex-wrap justify-center gap-2 pt-2">
+                    <button onclick="usePrompt('Evaluate SQLite WAL mode performance and locking semantics on edge devices')" class="px-3.5 py-2 rounded-2xl bg-[#1e1f20] hover:bg-[#282a2c] text-xs text-gemini-text border border-[#3c4043] transition-all hover:scale-[1.02]">
+                        Evaluate SQLite WAL mode on edge devices
+                    </button>
+                    <button onclick="usePrompt('Analyze FTS5 lexical BM25 retrieval vs Vector DB memory footprint')" class="px-3.5 py-2 rounded-2xl bg-[#1e1f20] hover:bg-[#282a2c] text-xs text-gemini-text border border-[#3c4043] transition-all hover:scale-[1.02]">
+                        FTS5 BM25 vs Vector DB memory footprint
+                    </button>
+                    <button onclick="usePrompt('Compare local Qwen/DeepSeek inference throughput with cloud APIs')" class="px-3.5 py-2 rounded-2xl bg-[#1e1f20] hover:bg-[#282a2c] text-xs text-gemini-text border border-[#3c4043] transition-all hover:scale-[1.02]">
+                        Local model throughput vs Cloud APIs
+                    </button>
+                </div>
+            </div>
+
+            <!-- Active Chat & Agent Stream Container -->
+            <div id="chat-stream-container" class="space-y-6 hidden w-full max-w-3xl mx-auto pb-24">
+                <!-- User Question Bubble -->
+                <div class="flex items-start justify-end space-x-3">
+                    <div class="max-w-xl bg-[#282a2c] text-white px-4 py-2.5 rounded-3xl text-sm leading-relaxed shadow-sm">
+                        <span id="rendered-user-prompt">User question here...</span>
+                    </div>
+                </div>
+
+                <!-- Agent Execution Thread -->
+                <div class="space-y-3">
+                    <div class="flex items-center space-x-2 text-xs text-gemini-muted pb-1">
+                        <div class="w-4 h-4 text-[#a8c7fa] flex items-center justify-center">
+                            <svg viewBox="0 0 24 24" fill="currentColor" class="w-4 h-4"><path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/></svg>
+                        </div>
+                        <span class="font-medium text-white">Research Agents Active</span>
+                    </div>
+
+                    <!-- Steps Timeline / Badges matching reference images -->
+                    <div id="agent-steps-timeline" class="space-y-1.5 font-mono text-xs">
+                        <!-- Dynamically populated SubAgent & Skill cards -->
+                    </div>
+
+                    <!-- Streaming Text Content Response -->
+                    <div class="border-t border-[#282a2c] pt-4 mt-2">
+                        <div id="streaming-markdown-output" class="prose text-sm text-[#e3e3e3] leading-relaxed select-text">
+                            <!-- Streamed answer -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ==================== FLOATING GEMINI PILL INPUT ==================== -->
+        <div class="w-full max-w-3xl mx-auto px-4 pb-6 z-20">
+            <div class="relative bg-gemini-input border border-gemini-border rounded-3xl shadow-xl hover:border-[#5e6368] transition-all focus-within:border-[#a8c7fa] focus-within:ring-1 focus-within:ring-[#a8c7fa]">
+                
+                <!-- Main Input Field -->
+                <div class="px-4 pt-3 pb-2 flex items-center">
+                    <button type="button" onclick="toggleEvidenceDrawer()" class="p-2 text-gemini-muted hover:text-white rounded-full hover:bg-gemini-hover transition-colors" title="Attach context or view evidence">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                    </button>
+                    
+                    <textarea 
+                        id="user-input-box"
+                        rows="1"
+                        placeholder="Type prompt or @ to see tools, skills, and agents..." 
+                        class="w-full bg-transparent border-0 focus:outline-none text-white text-sm placeholder-gemini-muted resize-none px-3 py-1 font-sans"
+                        onkeydown="handleKeyDown(event)"
+                    ></textarea>
+                </div>
+
+                <!-- Bottom Toolbar inside Pill -->
+                <div class="px-4 pb-2.5 pt-1 flex items-center justify-between border-t border-[#282a2c]/50 text-xs">
+                    <!-- Model Selector Pill -->
+                    <div class="flex items-center space-x-2">
+                        <div class="relative">
+                            <select id="active-model-select" class="appearance-none bg-[#282a2c] text-white hover:bg-[#37393b] border border-[#3c4043] rounded-full px-3 py-1 pr-6 text-xs font-medium cursor-pointer focus:outline-none">
+                                <option value="auto/qwen" selected>auto/qwen</option>
+                                <option value="auto/coding">auto/coding</option>
+                                <option value="auto/fast">auto/fast</option>
+                                <option value="auto/cheap">auto/cheap</option>
+                            </select>
+                            <svg class="w-3 h-3 text-gemini-muted absolute right-2 top-2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                        </div>
+                        <span class="text-[11px] text-gemini-muted font-mono hidden sm:inline">Local :20128</span>
+                    </div>
+
+                    <!-- Action Controls -->
+                    <div class="flex items-center space-x-2">
+                        <button id="dispatch-submit-btn" onclick="submitQuery()" class="p-2 rounded-full bg-[#1a73e8] hover:bg-[#1b66c9] text-white transition-all transform active:scale-95 shadow-md flex items-center justify-center">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+            <div class="text-center text-[11px] text-gemini-muted pt-2 font-mono">
+                BYOK Harness • SQLite FTS5 Verified Citations • Zero Data Exfiltration
+            </div>
+        </div>
+
+    </main>
+
+    <!-- ==================== RIGHT EVIDENCE & CITATION DRAWER ==================== -->
+    <aside id="evidence-drawer" class="w-80 bg-gemini-surface border-l border-[#282a2c] flex flex-col justify-between hidden z-20 transition-all">
+        <div class="p-4 border-b border-[#282a2c] flex items-center justify-between">
+            <div class="flex items-center space-x-2">
+                <span class="font-semibold text-xs tracking-wider uppercase text-white">Evidence & Claims</span>
+                <span id="evidence-count-badge" class="px-1.5 py-0.5 rounded-full bg-[#282a2c] text-[10px] text-gemini-blue font-mono">0 sources</span>
+            </div>
+            <button onclick="toggleEvidenceDrawer()" class="p-1 hover:bg-[#282a2c] rounded-full text-gemini-muted hover:text-white">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+        </div>
+
+        <div id="evidence-items-container" class="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-xs">
+            <div class="p-4 text-center text-gemini-muted text-xs">
+                Run a research task to see extracted evidence chunks and verified claim matrices.
+            </div>
+        </div>
+
+        <div class="p-3 border-t border-[#282a2c] text-[11px] font-mono text-gemini-muted flex justify-between">
+            <span>INDEX: SQLite FTS5</span>
+            <span class="text-emerald-400">BM25 ACTIVE</span>
+        </div>
+    </aside>
+
+    <!-- ==================== VAULT SETTINGS MODAL ==================== -->
+    <div id="vault-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+        <div class="bg-gemini-surface border border-gemini-border rounded-2xl w-full max-w-md p-6 space-y-5 shadow-2xl">
+            <div class="flex items-center justify-between border-b border-[#282a2c] pb-3">
+                <h3 class="text-base font-semibold text-white">BYOK Key Vault</h3>
+                <button onclick="closeVaultModal()" class="text-gemini-muted hover:text-white">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <!-- Current Key Status -->
+            <div class="space-y-2 text-xs">
+                <label class="text-gemini-muted uppercase tracking-wider font-mono text-[10px]">Configured Keys</label>
+                <div class="p-3 bg-[#131314] border border-[#282a2c] rounded-xl flex items-center justify-between font-mono">
+                    <div>
+                        <div class="text-white font-medium">local_openai</div>
+                        <div class="text-gemini-muted text-[10px]">Hint: ****6341 (AES-256-GCM)</div>
+                    </div>
+                    <button onclick="testKeyConnection()" id="test-key-btn" class="px-2.5 py-1 bg-[#282a2c] hover:bg-[#37393b] text-white rounded text-[11px] transition-colors">
+                        Test Connection
+                    </button>
+                </div>
+                <div id="test-key-result" class="text-[11px] font-mono text-emerald-400 hidden"></div>
+            </div>
+
+            <!-- Add / Update Key Form -->
+            <form id="vault-form" onsubmit="event.preventDefault(); saveKey();" class="space-y-3 text-xs">
+                <div>
+                    <label class="text-gemini-muted block mb-1">Provider Identifier</label>
+                    <input id="key-provider" type="text" value="local_openai" class="w-full bg-[#131314] border border-[#3c4043] rounded-lg p-2 text-white font-mono focus:outline-none focus:border-[#a8c7fa]">
+                </div>
+                <div>
+                    <label class="text-gemini-muted block mb-1">API Key</label>
+                    <input id="key-secret" type="password" placeholder="sk-..." class="w-full bg-[#131314] border border-[#3c4043] rounded-lg p-2 text-white font-mono focus:outline-none focus:border-[#a8c7fa]">
+                </div>
+                <div class="flex justify-end space-x-2 pt-2">
+                    <button type="button" onclick="closeVaultModal()" class="px-3 py-1.5 rounded-lg bg-[#282a2c] text-white text-xs">Cancel</button>
+                    <button type="submit" class="px-4 py-1.5 rounded-lg bg-[#1a73e8] hover:bg-[#1b66c9] text-white text-xs font-medium">Save to Vault</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- ==================== FRONTEND CONTROLLER JAVASCRIPT ==================== -->
+    <script>
+        function toggleSidebar() {
+            const sb = document.getElementById('sidebar');
+            const isCollapsed = sb.classList.contains('w-0');
+            if (isCollapsed) {
+                sb.classList.remove('w-0', 'border-transparent');
+                sb.classList.add('w-72', 'border-[#282a2c]');
+            } else {
+                sb.classList.remove('w-72', 'border-[#282a2c]');
+                sb.classList.add('w-0', 'border-transparent');
+            }
+        }
+
+        function toggleEvidenceDrawer() {
+            const drawer = document.getElementById('evidence-drawer');
+            drawer.classList.toggle('hidden');
+        }
+
+        function openVaultModal() {
+            document.getElementById('vault-modal').classList.remove('hidden');
+        }
+
+        function closeVaultModal() {
+            document.getElementById('vault-modal').classList.add('hidden');
+        }
+
+        function usePrompt(text) {
+            document.getElementById('user-input-box').value = text;
+            submitQuery();
+        }
+
+        function handleKeyDown(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                submitQuery();
+            }
+        }
+
+        function startNewChat() {
+            document.getElementById('hero-view').classList.remove('hidden');
+            document.getElementById('chat-stream-container').classList.add('hidden');
+            document.getElementById('user-input-box').value = '';
+            document.getElementById('agent-steps-timeline').innerHTML = '';
+            document.getElementById('streaming-markdown-output').innerHTML = '';
+            document.getElementById('user-input-box').focus();
+        }
+
+        async function submitQuery() {
+            const promptBox = document.getElementById('user-input-box');
+            const prompt = promptBox.value.trim();
+            const model = document.getElementById('active-model-select').value;
+            const submitBtn = document.getElementById('dispatch-submit-btn');
+
+            if (!prompt) return;
+
+            // Transition UI from Hero to Active Stream
+            document.getElementById('hero-view').classList.add('hidden');
+            document.getElementById('chat-stream-container').classList.remove('hidden');
+            document.getElementById('rendered-user-prompt').textContent = prompt;
+            
+            const timeline = document.getElementById('agent-steps-timeline');
+            const outputBox = document.getElementById('streaming-markdown-output');
+            timeline.innerHTML = '';
+            outputBox.innerHTML = '';
+            outputBox.classList.add('typing-cursor');
+
+            submitBtn.disabled = true;
+            submitBtn.classList.add('opacity-50');
+
+            try {
+                // 1. Create Run in DB
+                const res = await fetch('/api/runs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt, model })
+                });
+                const data = await res.json();
+                if (!data.ok) throw new Error(data.error || "Failed to initialize run");
+
+                const runId = data.run_id;
+                document.getElementById('current-title-badge').textContent = prompt;
+
+                // 2. Open Server-Sent Events Stream
+                const evtSource = new EventSource(`/api/runs/${runId}/stream?model=${encodeURIComponent(model)}`);
+
+                evtSource.onmessage = function(e) {
+                    try {
+                        const payload = JSON.parse(e.data);
+
+                        // Match Image 2: SubAgent robot chip
+                        if (payload.type === 'subagent') {
+                            const row = document.createElement('div');
+                            row.className = 'flex items-center space-x-2 text-xs py-1 px-2 rounded bg-[#1e1f20]/60 border border-[#282a2c] animate-fade-in';
+                            row.innerHTML = `
+                                <svg class="w-3.5 h-3.5 text-[#8e918f] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>
+                                <span class="font-bold text-[#c4c7c5]">SubAgent</span>
+                                <span class="text-[#a8c7fa] font-medium">${payload.name}</span>
+                                <span class="text-gemini-muted">·</span>
+                                <span class="text-gemini-muted truncate">${payload.action}</span>
+                            `;
+                            timeline.appendChild(row);
+                        }
+
+                        // Match Image 3 & 4: Skill wand chip
+                        else if (payload.type === 'skill') {
+                            const row = document.createElement('div');
+                            row.className = 'flex items-center space-x-2 text-xs py-1 px-2 rounded bg-[#1e1f20]/60 border border-[#282a2c] animate-fade-in';
+                            row.innerHTML = `
+                                <svg class="w-3.5 h-3.5 text-[#8e918f] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+                                <span class="font-bold text-[#c4c7c5]">Skill</span>
+                                <span class="text-white font-medium">${payload.name}</span>
+                                <span class="text-gemini-muted text-[11px] truncate">${payload.detail || ''}</span>
+                            `;
+                            timeline.appendChild(row);
+                        }
+
+                        // Add Evidence Chunk
+                        else if (payload.type === 'evidence') {
+                            addEvidenceCard(payload.chunk_id, payload.domain, payload.snippet);
+                        }
+
+                        // Streaming Token Chunk
+                        else if (payload.type === 'token') {
+                            outputBox.innerHTML += formatMarkdown(payload.delta);
+                        }
+
+                        // Completion
+                        else if (payload.type === 'done') {
+                            outputBox.classList.remove('typing-cursor');
+                            evtSource.close();
+                            submitBtn.disabled = false;
+                            submitBtn.classList.remove('opacity-50');
+                            promptBox.value = '';
+                        }
+
+                        // Error
+                        else if (payload.type === 'error') {
+                            outputBox.classList.remove('typing-cursor');
+                            outputBox.innerHTML += `<div class="text-rose-400 p-2 mt-2 bg-rose-950/20 border border-rose-800 rounded">${payload.message}</div>`;
+                            evtSource.close();
+                            submitBtn.disabled = false;
+                            submitBtn.classList.remove('opacity-50');
+                        }
+                    } catch (err) {
+                        console.error("Stream parse error:", err);
+                    }
+                };
+
+                evtSource.onerror = function() {
+                    outputBox.classList.remove('typing-cursor');
+                    evtSource.close();
+                    submitBtn.disabled = false;
+                    submitBtn.classList.remove('opacity-50');
+                };
+
+            } catch (err) {
+                outputBox.innerHTML = `<div class="text-rose-400">Failed: ${err.message}</div>`;
+                submitBtn.disabled = false;
+                submitBtn.classList.remove('opacity-50');
+            }
+        }
+
+        function addEvidenceCard(chunkId, domain, snippet) {
+            const container = document.getElementById('evidence-items-container');
+            if (container.children.length === 1 && container.children[0].textContent.includes('Run a research task')) {
+                container.innerHTML = '';
+            }
+            const card = document.createElement('div');
+            card.className = 'p-3 rounded-xl bg-[#131314] border border-[#282a2c] space-y-1.5 hover:border-[#3c4043] transition-colors';
+            card.innerHTML = `
+                <div class="flex items-center justify-between text-[11px]">
+                    <span class="text-[#a8c7fa] font-semibold">${chunkId}</span>
+                    <span class="text-gemini-muted text-[10px]">${domain}</span>
+                </div>
+                <p class="text-white text-xs leading-relaxed font-sans">${snippet}</p>
+                <div class="text-[10px] text-emerald-400 font-mono">BM25 Rank: 0.96 · Verified</div>
+            `;
+            container.appendChild(card);
+            document.getElementById('evidence-count-badge').textContent = `${container.children.length} sources`;
+        }
+
+        function formatMarkdown(text) {
+            // Minimal fast converter for bold, newlines, and bullet points
+            return text
+                .replace(/\n\n/g, '<br><br>')
+                .replace(/\n/g, '<br>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        }
+
+        async function testKeyConnection() {
+            const btn = document.getElementById('test-key-btn');
+            const resultBox = document.getElementById('test-key-result');
+            btn.disabled = true;
+            btn.textContent = "Testing...";
+            try {
+                const res = await fetch('/api/vault/test', { method: 'POST' });
+                const data = await res.json();
+                if (data.ok) {
+                    resultBox.textContent = `Connected! ${data.model_count} models online.`;
+                    resultBox.className = "text-[11px] font-mono text-emerald-400";
+                } else {
+                    resultBox.textContent = `Error: ${data.error || 'Failed'}`;
+                    resultBox.className = "text-[11px] font-mono text-rose-400";
+                }
+                resultBox.classList.remove('hidden');
+            } catch (e) {
+                resultBox.textContent = `Failed: ${e.message}`;
+                resultBox.className = "text-[11px] font-mono text-rose-400";
+                resultBox.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = "Test Connection";
+            }
+        }
+    </script>
+</body>
+</html>

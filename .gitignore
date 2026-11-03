@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local BYOK Data & Keys (NEVER COMMIT CREDENTIALS OR DATABASES)
+data/
+*.key
+*.db
+*.db-wal
+*.db-shm
+.env
+*.env
+
+# Node & Frontend dependencies
+frontend/node_modules/
+frontend/dist/
+node_modules/
+dist/
+
+# Test artifacts and caches
+.pytest_cache/
+.playwright-mcp/
+.video_agent/
+tests/sample_research_doc.txt
+
+# OS metadata
+.DS_Store
+Thumbs.db

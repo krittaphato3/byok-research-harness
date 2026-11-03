@@ -1,0 +1,20 @@
+services:
+  byok-harness:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: byok-research-harness
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_PATH=/app/data/harness.db
+      - MASTER_KEY_PATH=/app/data/master.key
+      - DEFAULT_ENDPOINT_URL=http://host.docker.internal:20128/v1
+      - DEFAULT_MODEL=auto/qwen
+    volumes:
+      # Persistent local storage for SQLite database and AES master key
+      - ./data:/app/data
+    extra_hosts:
+      # Allows container to reach local host endpoint at localhost:20128
+      - "host.docker.internal:host-gateway"
