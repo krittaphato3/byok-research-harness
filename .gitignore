@@ -23,6 +23,8 @@ dist/
 .playwright-mcp/
 .video_agent/
 tests/sample_research_doc.txt
+tests/*.png
+graphify-out/
 
 # OS metadata
 .DS_Store

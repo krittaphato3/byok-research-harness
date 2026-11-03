@@ -14,6 +14,9 @@ import {
   Database,
   FileText,
   Sparkles,
+  Square,
+  Wand2,
+  CornerDownLeft,
 } from 'lucide-react';
 import type { AttachedFile } from '../types';
 
@@ -28,10 +31,12 @@ export interface ModelOption {
 interface InputBarProps {
   onDispatch: (prompt: string, model: string, files: AttachedFile[], provider?: string) => void;
   isLoading: boolean;
+  onAbort?: () => void;
   selectedModel: string;
   onModelChange: (model: string, provider?: string) => void;
   onToggleEvidence: () => void;
   availableModels?: ModelOption[];
+  parentRunId?: string | null;
 }
 
 interface MentionOption {
@@ -44,7 +49,7 @@ interface MentionOption {
 }
 
 const DEFAULT_MENTIONS: MentionOption[] = [
-  // SubAgents
+  // Core SubAgents
   {
     id: 'planner',
     tag: '@subagent:planner',
@@ -93,7 +98,7 @@ const DEFAULT_MENTIONS: MentionOption[] = [
     label: 'web-fetch',
     description: 'Scrapes and indexes raw page content to markdown',
     category: 'Skills',
-    icon: <FileCode className="w-3.5 h-3.5 text-blue-400" />,
+    icon: <FileCode className="w-3.5 h-3.5 text-orange-400" />,
   },
   {
     id: 'sqlite-fts5',
@@ -108,15 +113,21 @@ const DEFAULT_MENTIONS: MentionOption[] = [
 export const InputBar: React.FC<InputBarProps> = ({
   onDispatch,
   isLoading,
+  onAbort,
   selectedModel,
   onModelChange,
   onToggleEvidence,
   availableModels = [],
+  parentRunId,
 }) => {
   const [prompt, setPrompt] = useState('');
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+
+  // Dynamic Custom Subagents & Skills
+  const [dynamicMentions, setDynamicMentions] = useState<MentionOption[]>([]);
 
   // Mention State
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -126,6 +137,55 @@ export const InputBar: React.FC<InputBarProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Fetch registered subagents & skills dynamically
+  useEffect(() => {
+    const loadRegistry = async () => {
+      try {
+        const [subRes, skillRes] = await Promise.all([
+          fetch('/api/subagents'),
+          fetch('/api/skills'),
+        ]);
+        const subData = await subRes.json();
+        const skillData = await skillRes.json();
+
+        const customItems: MentionOption[] = [];
+
+        if (subData.ok && Array.isArray(subData.subagents)) {
+          for (const s of subData.subagents) {
+            if (['planner', 'skeptic', 'editor'].includes(s.name.toLowerCase())) continue;
+            customItems.push({
+              id: `custom-sub-${s.id}`,
+              tag: `@subagent:${s.name}`,
+              label: s.name,
+              description: s.description || 'Specialized domain agent',
+              category: 'SubAgents',
+              icon: <Bot className="w-3.5 h-3.5" style={{ color: s.color || '#38bdf8' }} />,
+            });
+          }
+        }
+
+        if (skillData.ok && Array.isArray(skillData.skills)) {
+          for (const sk of skillData.skills) {
+            if (['web-search', 'web-fetch', 'sqlite-fts5'].includes(sk.name.toLowerCase())) continue;
+            customItems.push({
+              id: `custom-skill-${sk.id}`,
+              tag: `@skill:${sk.name}`,
+              label: sk.name,
+              description: sk.description || 'Custom capability',
+              category: 'Skills',
+              icon: <Globe className="w-3.5 h-3.5 text-teal-400" />,
+            });
+          }
+        }
+
+        setDynamicMentions(customItems);
+      } catch (err) {
+        // Fallback to static
+      }
+    };
+    loadRegistry();
+  }, []);
 
   // Close dropdown on click outside
   useEffect(() => {
@@ -138,42 +198,45 @@ export const InputBar: React.FC<InputBarProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Compute all available mentions (SubAgents + Skills + Attached Files)
+  // Compute all available mentions
   const allMentions: MentionOption[] = [
     ...DEFAULT_MENTIONS,
+    ...dynamicMentions,
     ...attachedFiles.map((file) => ({
       id: `file-${file.id}`,
       tag: `@file:${file.name}`,
       label: file.name,
       description: `Attached document (${Math.round(file.size / 1024)} KB)`,
       category: 'Files' as const,
-      icon: <FileText className="w-3.5 h-3.5 text-amber-300" />,
+      icon: <FileText className="w-3.5 h-3.5 text-amber-400" />,
     })),
   ];
 
-  const filteredMentions = allMentions.filter((m) =>
-    m.tag.toLowerCase().includes(mentionQuery.toLowerCase()) ||
-    m.label.toLowerCase().includes(mentionQuery.toLowerCase()) ||
-    m.description.toLowerCase().includes(mentionQuery.toLowerCase())
-  );
+  // Filter mentions by query
+  const filteredMentions = allMentions.filter((m) => {
+    const q = mentionQuery.toLowerCase();
+    return (
+      m.label.toLowerCase().includes(q) ||
+      m.description.toLowerCase().includes(q) ||
+      m.tag.toLowerCase().includes(q)
+    );
+  });
 
   const handleTextChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setPrompt(val);
 
-    // Check for @ mention trigger
-    const cursorPos = e.target.selectionStart || 0;
-    const textBeforeCursor = val.slice(0, cursorPos);
+    const cursor = e.target.selectionStart;
+    const textBeforeCursor = val.slice(0, cursor);
     const lastAtIndex = textBeforeCursor.lastIndexOf('@');
 
     if (lastAtIndex !== -1) {
       const charBeforeAt = lastAtIndex > 0 ? textBeforeCursor[lastAtIndex - 1] : ' ';
-      // Ensure @ is preceded by space, newline, or start of input
-      if (charBeforeAt === ' ' || charBeforeAt === '\n' || lastAtIndex === 0) {
+      if (charBeforeAt === ' ' || charBeforeAt === '\n') {
         const query = textBeforeCursor.slice(lastAtIndex + 1);
-        if (!query.includes(' ') && !query.includes('\n')) {
-          setMentionQuery(query);
+        if (!query.includes(' ')) {
           setMentionOpen(true);
+          setMentionQuery(query);
           setMentionSelectedIndex(0);
           return;
         }
@@ -185,14 +248,14 @@ export const InputBar: React.FC<InputBarProps> = ({
 
   const insertMention = (mentionTag: string) => {
     if (!textareaRef.current) return;
-    const cursorPos = textareaRef.current.selectionStart || 0;
-    const textBeforeCursor = prompt.slice(0, cursorPos);
-    const textAfterCursor = prompt.slice(cursorPos);
+    const cursor = textareaRef.current.selectionStart;
+    const textBeforeCursor = prompt.slice(0, cursor);
+    const textAfterCursor = prompt.slice(cursor);
     const lastAtIndex = textBeforeCursor.lastIndexOf('@');
 
     if (lastAtIndex !== -1) {
-      const beforeAt = prompt.slice(0, lastAtIndex);
-      const newPrompt = beforeAt + mentionTag + ' ' + textAfterCursor;
+      const newPrompt =
+        prompt.slice(0, lastAtIndex) + mentionTag + ' ' + textAfterCursor;
       setPrompt(newPrompt);
       setMentionOpen(false);
 
@@ -275,43 +338,60 @@ export const InputBar: React.FC<InputBarProps> = ({
     setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
+  const handleEnhancePrompt = async () => {
+    if (!prompt.trim() || isEnhancing || isLoading) return;
+    setIsEnhancing(true);
+    try {
+      const res = await fetch('/api/prompt/enhance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          model: selectedModel,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok && data.enhanced_prompt) {
+        setPrompt(data.enhanced_prompt);
+      }
+    } catch (err) {
+      console.error('Prompt enhancement error:', err);
+    } finally {
+      setIsEnhancing(false);
+    }
+  };
+
   const handleSubmit = () => {
     if ((!prompt.trim() && attachedFiles.length === 0) || isLoading) return;
-    const currentModelObj = availableModels.find((m) => m.id === selectedModel);
-    onDispatch(prompt.trim(), selectedModel, attachedFiles, currentModelObj?.provider);
+    const selectedObj = availableModels.find((m) => m.id === selectedModel);
+    onDispatch(prompt.trim(), selectedModel, attachedFiles, selectedObj?.provider);
     setPrompt('');
     setAttachedFiles([]);
     setMentionOpen(false);
   };
 
-  // Grouped mention categories for cleaner list presentation
-  const mentionCategories: ('SubAgents' | 'Skills' | 'Files')[] = ['SubAgents', 'Skills', 'Files'];
-
   return (
-    <div className="w-full max-w-3xl mx-auto px-4 pb-6 z-20">
-      <div className="relative bg-[#1e1f20] border border-[#3c4043] rounded-3xl shadow-2xl hover:border-[#5e6368] transition-all focus-within:border-[#a8c7fa] focus-within:ring-1 focus-within:ring-[#a8c7fa]">
-        
+    <div className="max-w-4xl w-full mx-auto p-4 z-20">
+      <div className="relative rounded-3xl bg-[#1e1f20] border border-[#3c4043] shadow-2xl focus-within:border-cyan-400 focus-within:ring-1 focus-within:ring-cyan-400/40 transition-all backdrop-blur-md">
         {/* ================== Mention Popup Menu ================== */}
         {mentionOpen && filteredMentions.length > 0 && (
-          <div className="absolute bottom-full left-4 mb-3 w-80 max-h-72 bg-[#1a1b1d] border border-[#3c4043] rounded-2xl shadow-2xl overflow-y-auto py-2 z-50 animate-in fade-in zoom-in-95 backdrop-blur-md">
-            <div className="px-3 pb-1.5 border-b border-[#282a2c] flex items-center justify-between text-[11px] text-[#8e918f]">
-              <span className="font-semibold uppercase tracking-wider">Mention Agents & Skills</span>
-              <span>Use ↑↓ Enter</span>
+          <div className="absolute bottom-full left-4 mb-2 w-80 max-h-72 bg-[#18191b] border border-[#3c4043] rounded-2xl shadow-2xl overflow-y-auto py-2 z-50 animate-in fade-in zoom-in-95 font-sans">
+            <div className="px-3 py-1 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider flex items-center justify-between border-b border-[#282a2c] mb-1">
+              <span>Invoke SubAgent, Skill, or File</span>
+              <span>Use ↑ ↓ to navigate</span>
             </div>
 
-            {mentionCategories.map((cat) => {
-              const catItems = filteredMentions.filter((m) => m.category === cat);
-              if (catItems.length === 0) return null;
-
+            {(['SubAgents', 'Skills', 'Files'] as const).map((cat) => {
+              const items = filteredMentions.filter((m) => m.category === cat);
+              if (items.length === 0) return null;
               return (
-                <div key={cat} className="pt-2">
-                  <div className="px-3 pb-1 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">
+                <div key={cat} className="mb-1">
+                  <div className="px-3 py-1 text-[10px] font-mono font-medium text-cyan-400 uppercase tracking-wider">
                     {cat}
                   </div>
-                  {catItems.map((item) => {
-                    const globalIdx = filteredMentions.findIndex((m) => m.id === item.id);
+                  {items.map((item) => {
+                    const globalIdx = filteredMentions.indexOf(item);
                     const isSelected = globalIdx === mentionSelectedIndex;
-
                     return (
                       <button
                         key={item.id}
@@ -363,16 +443,20 @@ export const InputBar: React.FC<InputBarProps> = ({
                 </button>
               </div>
             ))}
-            {isUploading && (
-              <div className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-[#242628] border border-[#3c4043] text-xs text-zinc-400 animate-pulse">
-                <span>Uploading file...</span>
-              </div>
-            )}
           </div>
         )}
 
-        {/* ================== Input Text Area & Actions ================== */}
-        <div className="px-4 pt-3 pb-2 flex items-center">
+        {/* ================== Follow-Up Thread Indicator ================== */}
+        {parentRunId && (
+          <div className="px-4 pt-2 flex items-center space-x-1.5 text-[11px] text-cyan-400 font-mono">
+            <CornerDownLeft className="w-3 h-3 text-cyan-400" />
+            <span>Multi-turn follow-up (grounded in previous research evidence)</span>
+          </div>
+        )}
+
+        {/* ================== Text Input & Primary Actions ================== */}
+        <div className="flex items-center px-4 py-2">
+          {/* File Upload Hidden Input */}
           <input
             type="file"
             ref={fileInputRef}
@@ -384,10 +468,15 @@ export const InputBar: React.FC<InputBarProps> = ({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
             className="p-2 text-[#8e918f] hover:text-white rounded-full hover:bg-[#282a2c] transition-colors"
             title="Attach files or datasets"
           >
-            <Paperclip className="w-4 h-4" />
+            {isUploading ? (
+              <span className="w-4 h-4 border-2 border-cyan-400 border-t-transparent rounded-full animate-spin inline-block" />
+            ) : (
+              <Paperclip className="w-4 h-4" />
+            )}
           </button>
 
           <textarea
@@ -397,18 +486,48 @@ export const InputBar: React.FC<InputBarProps> = ({
             value={prompt}
             onChange={handleTextChange}
             onKeyDown={handleKeyDown}
-            placeholder="Type prompt or type @ for subagents & skills..."
+            placeholder={
+              parentRunId
+                ? 'Ask a follow-up question based on this evidence, or type @...'
+                : 'Type prompt, question, or type @ to invoke subagents & skills...'
+            }
             className="flex-1 bg-transparent px-3 py-1 text-sm text-[#e3e3e3] placeholder-[#8e918f] focus:outline-none resize-none max-h-32 leading-relaxed"
           />
 
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isLoading || (!prompt.trim() && attachedFiles.length === 0)}
-            className="p-2 rounded-full bg-white text-black hover:bg-neutral-200 transition-colors disabled:opacity-40 disabled:hover:bg-white shrink-0 ml-1 shadow-sm"
-          >
-            <ArrowRight className="w-4 h-4" />
-          </button>
+          {/* Prompt Enhancer Button */}
+          {prompt.trim() && !isLoading && (
+            <button
+              type="button"
+              onClick={handleEnhancePrompt}
+              disabled={isEnhancing}
+              className="p-2 text-zinc-400 hover:text-cyan-300 rounded-full hover:bg-[#282a2c] transition-colors shrink-0"
+              title="Enhance prompt into a structured research directive"
+            >
+              <Wand2 className={`w-4 h-4 ${isEnhancing ? 'animate-spin text-cyan-400' : ''}`} />
+            </button>
+          )}
+
+          {/* Stop / Abort Button or Send Button */}
+          {isLoading ? (
+            <button
+              type="button"
+              onClick={onAbort}
+              className="p-2 rounded-full bg-red-600 hover:bg-red-500 text-white transition-all shrink-0 ml-1 shadow-md hover:scale-105"
+              title="Stop research generation"
+            >
+              <Square className="w-3.5 h-3.5 fill-current" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={!prompt.trim() && attachedFiles.length === 0}
+              className="p-2 rounded-full bg-white text-black hover:bg-neutral-200 transition-colors disabled:opacity-40 disabled:hover:bg-white shrink-0 ml-1 shadow-sm"
+              title="Dispatch research run (Enter)"
+            >
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          )}
         </div>
 
         {/* ================== Bottom Options Bar ================== */}
@@ -449,13 +568,13 @@ export const InputBar: React.FC<InputBarProps> = ({
                           }`}
                         >
                           <div className="truncate">
-                            <div className="font-mono font-medium truncate">{m.name || m.id}</div>
+                            <div className="font-mono text-xs truncate">{m.name}</div>
                             {m.providerLabel && (
                               <div className="text-[10px] text-[#8e918f]">{m.providerLabel}</div>
                             )}
                           </div>
                           {m.tags && m.tags.length > 0 && (
-                            <span className="text-[9px] px-1 py-0.5 rounded bg-[#141517] text-[#8e918f] border border-[#3c4043] shrink-0 font-mono ml-1">
+                            <span className="px-1.5 py-0.5 rounded text-[10px] bg-[#3c4043] text-cyan-300 font-mono shrink-0 ml-2">
                               {m.tags[0]}
                             </span>
                           )}
@@ -467,17 +586,38 @@ export const InputBar: React.FC<InputBarProps> = ({
               )}
             </div>
 
+            {/* Quick @ shortcut button */}
+            <button
+              type="button"
+              onClick={() => {
+                if (textareaRef.current) {
+                  setPrompt((prev) => (prev ? prev + ' @' : '@'));
+                  textareaRef.current.focus();
+                  setMentionOpen(true);
+                  setMentionQuery('');
+                }
+              }}
+              className="flex items-center space-x-1 px-2 py-0.5 rounded-full hover:bg-[#282a2c] text-zinc-400 hover:text-white transition-colors"
+              title="Invoke SubAgents, Skills, or Files"
+            >
+              <Bot className="w-3 h-3 text-cyan-400" />
+              <span>@ agents & skills</span>
+            </button>
+
+            {/* Quick Evidence Ledger Toggle */}
             <button
               type="button"
               onClick={onToggleEvidence}
-              className="text-[11px] text-[#8e918f] hover:text-white transition-colors"
+              className="flex items-center space-x-1 px-2 py-0.5 rounded-full hover:bg-[#282a2c] text-zinc-400 hover:text-emerald-300 transition-colors"
+              title="Toggle SQLite FTS5 evidence drawer"
             >
-              Evidence Provenance
+              <Database className="w-3 h-3 text-emerald-400" />
+              <span>Evidence</span>
             </button>
           </div>
 
-          <div className="text-[10px] text-zinc-500 font-mono">
-            Type <span className="text-cyan-400">@</span> to call agents
+          <div className="flex items-center space-x-2 text-[11px] font-mono">
+            <span>BYOK Local-First</span>
           </div>
         </div>
       </div>
