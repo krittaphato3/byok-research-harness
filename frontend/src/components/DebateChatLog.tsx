@@ -11,6 +11,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { DebateMessage } from '../types';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface DebateChatLogProps {
   debateTurns: DebateMessage[];
@@ -189,8 +190,8 @@ export const DebateChatLog: React.FC<DebateChatLogProps> = ({
                   </div>
 
                   {/* Turn Content */}
-                  <div className="text-zinc-200 leading-relaxed pl-7 text-[12px] whitespace-pre-wrap">
-                    {turn.content}
+                  <div className="text-zinc-200 leading-relaxed pl-7 text-[12px]">
+                    <MarkdownRenderer content={turn.content} className="text-[12px]" />
                     {isStreaming && (
                       <span className="inline-block w-1.5 h-3.5 bg-cyan-400 ml-1 animate-pulse align-middle" />
                     )}

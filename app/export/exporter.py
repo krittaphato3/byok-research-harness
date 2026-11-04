@@ -4,14 +4,20 @@ Exports research reports to Markdown with YAML frontmatter,
 standalone print-ready HTML with executive typography, and structured JSON dossiers.
 """
 
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import html
 import json
 from datetime import datetime
 
 
-def export_to_markdown(run: Dict[str, Any], report: str, thoughts: str, evidence: List[Dict[str, Any]]) -> str:
-    """Generate clean Markdown document with metadata frontmatter."""
+def export_to_markdown(
+    run: Dict[str, Any],
+    report: str,
+    thoughts: str,
+    evidence: List[Dict[str, Any]],
+    debate: Optional[List[Dict[str, Any]]] = None,
+) -> str:
+    """Generate clean Markdown document with metadata frontmatter and debate transcript."""
     created_at = run.get("created_at", datetime.utcnow().isoformat())
     title = run.get("title", "Research Report")
     prompt = run.get("prompt", "")
@@ -22,6 +28,7 @@ date: "{created_at}"
 prompt: "{prompt.replace('"', '\\"')}"
 generator: "BYOK Research Workbench"
 sources_count: {len(evidence)}
+debate_turns_count: {len(debate or [])}
 ---
 
 # {title}
@@ -34,10 +41,23 @@ sources_count: {len(evidence)}
 ## Synthesized Research Report
 
 {report}
+"""
 
+    debate_block = ""
+    if debate:
+        turns_str = []
+        for t in debate:
+            spk = t.get("speakerName") or t.get("speaker", "Agent")
+            role = t.get("speakerRole", "")
+            ts = t.get("timestamp", "")
+            content = t.get("content", "").strip()
+            turns_str.append(f"### {spk} ({role}) — {ts}\n\n> {content.replace(chr(10), chr(10) + '> ')}")
+        debate_block = f"""
 ---
 
-## Evidence Ledger & Sources
+## Adversarial Multi-Agent Court Debate Transcript
+
+{chr(10).join(turns_str)}
 """
 
     sources_block = []
@@ -51,7 +71,7 @@ sources_count: {len(evidence)}
     if not sources_block:
         sources_block.append("_No external sources were indexed for this run._")
 
-    sources_str = "\n\n".join(sources_block)
+    sources_str = "\n\n---\n\n## Evidence Ledger & Sources\n\n" + "\n\n".join(sources_block)
 
     audit_block = ""
     if thoughts:
@@ -66,10 +86,16 @@ sources_count: {len(evidence)}
 ```
 """
 
-    return frontmatter + sources_str + audit_block
+    return frontmatter + debate_block + sources_str + audit_block
 
 
-def export_to_html(run: Dict[str, Any], report: str, thoughts: str, evidence: List[Dict[str, Any]]) -> str:
+def export_to_html(
+    run: Dict[str, Any],
+    report: str,
+    thoughts: str,
+    evidence: List[Dict[str, Any]],
+    debate: Optional[List[Dict[str, Any]]] = None,
+) -> str:
     """Generate a self-contained, publication-grade HTML report suitable for browser viewing, sharing, or Print-to-PDF."""
     title = html.escape(run.get("title", "Research Report"))
     prompt = html.escape(run.get("prompt", ""))
@@ -97,6 +123,33 @@ def export_to_html(run: Dict[str, Any], report: str, thoughts: str, evidence: Li
             formatted_paragraphs.append(f"<p>{html.escape(p_clean).replace(chr(10), '<br/>')}</p>")
 
     report_html = "\n".join(formatted_paragraphs)
+
+    debate_html = ""
+    if debate:
+        debate_cards = []
+        for turn in debate:
+            spk_name = html.escape(turn.get("speakerName") or turn.get("speaker", "Agent"))
+            spk_role = html.escape(turn.get("speakerRole", ""))
+            color = html.escape(turn.get("avatarColor", "#38bdf8"))
+            ts = html.escape(turn.get("timestamp", ""))
+            content = html.escape(turn.get("content", "")).replace("\n", "<br/>")
+            debate_cards.append(f"""
+            <div class="debate-turn-card" style="margin-bottom: 14px; background: var(--surface); padding: 14px 18px; border-radius: 8px; border: 1px solid var(--border); border-left: 4px solid {color};">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                    <span style="background: {color}22; color: {color}; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">{spk_name[:2].upper()}</span>
+                    <strong style="font-size: 14px;">{spk_name}</strong>
+                    <span style="font-size: 12px; color: var(--text-muted);">{spk_role}</span>
+                    <span style="font-size: 11px; color: var(--text-muted); margin-left: auto;">{ts}</span>
+                </div>
+                <div style="font-size: 14px; line-height: 1.6;">{content}</div>
+            </div>
+            """)
+        debate_html = f"""
+        <section class="debate-section" style="margin-bottom: 40px;">
+            <h2>Multi-Agent Adversarial Court Debate</h2>
+            <div>{''.join(debate_cards)}</div>
+        </section>
+        """
 
     evidence_rows = []
     for idx, ev in enumerate(evidence, 1):
@@ -360,6 +413,8 @@ def export_to_html(run: Dict[str, Any], report: str, thoughts: str, evidence: Li
             {report_html}
         </main>
 
+        {debate_html}
+
         <section class="sources-section">
             <h2>Evidence Ledger ({len(evidence)} Sources Indexed)</h2>
             {evidence_html}
@@ -388,6 +443,7 @@ def export_to_json_dossier(
     thoughts: str,
     events: List[Dict[str, Any]],
     evidence: List[Dict[str, Any]],
+    debate: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Generate a complete machine-readable research dossier for auditing or downstream processing."""
     return {
@@ -401,6 +457,7 @@ def export_to_json_dossier(
             "character_count": len(report),
             "word_count": len(report.split()),
         },
+        "debate_transcript": debate or [],
         "evidence_ledger": evidence,
         "pipeline_events": events,
     }

@@ -17,8 +17,13 @@ import {
   Square,
   Wand2,
   CornerDownLeft,
+  Copy,
+  Check,
+  Zap,
+  Swords,
+  Compass,
 } from 'lucide-react';
-import type { AttachedFile } from '../types';
+import type { AttachedFile, ResearchMode } from '../types';
 
 export interface ModelOption {
   id: string;
@@ -29,7 +34,13 @@ export interface ModelOption {
 }
 
 interface InputBarProps {
-  onDispatch: (prompt: string, model: string, files: AttachedFile[], provider?: string) => void;
+  onDispatch: (
+    prompt: string,
+    model: string,
+    files: AttachedFile[],
+    provider?: string,
+    mode?: ResearchMode
+  ) => void;
   isLoading: boolean;
   onAbort?: () => void;
   selectedModel: string;
@@ -37,6 +48,8 @@ interface InputBarProps {
   onToggleEvidence: () => void;
   availableModels?: ModelOption[];
   parentRunId?: string | null;
+  externalPrompt?: string | null;
+  initialMode?: ResearchMode;
 }
 
 interface MentionOption {
@@ -119,8 +132,13 @@ export const InputBar: React.FC<InputBarProps> = ({
   onToggleEvidence,
   availableModels = [],
   parentRunId,
+  externalPrompt,
+  initialMode,
 }) => {
   const [prompt, setPrompt] = useState('');
+  const [selectedMode, setSelectedMode] = useState<ResearchMode>(initialMode || 'deep_research');
+  const [copiedInput, setCopiedInput] = useState(false);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isEnhancing, setIsEnhancing] = useState(false);
@@ -137,6 +155,19 @@ export const InputBar: React.FC<InputBarProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (externalPrompt !== undefined && externalPrompt !== null) {
+      setPrompt(externalPrompt);
+      setHistoryIndex(-1);
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.setSelectionRange(externalPrompt.length, externalPrompt.length);
+        }
+      }, 50);
+    }
+  }, [externalPrompt]);
 
   // Fetch registered subagents & skills dynamically
   useEffect(() => {
@@ -293,6 +324,40 @@ export const InputBar: React.FC<InputBarProps> = ({
       }
     }
 
+    if (!mentionOpen) {
+      if (e.key === 'ArrowUp' && (prompt === '' || historyIndex !== -1)) {
+        e.preventDefault();
+        try {
+          const raw = localStorage.getItem('byok_prompt_history');
+          const history = raw ? JSON.parse(raw) : [];
+          if (Array.isArray(history) && history.length > 0) {
+            const nextIdx = Math.min(historyIndex + 1, history.length - 1);
+            setHistoryIndex(nextIdx);
+            setPrompt(history[nextIdx]);
+          }
+        } catch {}
+        return;
+      }
+      if (e.key === 'ArrowDown' && historyIndex !== -1) {
+        e.preventDefault();
+        try {
+          const raw = localStorage.getItem('byok_prompt_history');
+          const history = raw ? JSON.parse(raw) : [];
+          if (Array.isArray(history)) {
+            const nextIdx = historyIndex - 1;
+            if (nextIdx < 0) {
+              setHistoryIndex(-1);
+              setPrompt('');
+            } else {
+              setHistoryIndex(nextIdx);
+              setPrompt(history[nextIdx]);
+            }
+          }
+        } catch {}
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSubmit();
@@ -362,9 +427,19 @@ export const InputBar: React.FC<InputBarProps> = ({
   };
 
   const handleSubmit = () => {
-    if ((!prompt.trim() && attachedFiles.length === 0) || isLoading) return;
+    const trimmed = prompt.trim();
+    if ((!trimmed && attachedFiles.length === 0) || isLoading) return;
+    try {
+      const raw = localStorage.getItem('byok_prompt_history');
+      const history = raw ? JSON.parse(raw) : [];
+      if (trimmed) {
+        const updated = [trimmed, ...history.filter((p: string) => p !== trimmed)].slice(0, 30);
+        localStorage.setItem('byok_prompt_history', JSON.stringify(updated));
+      }
+    } catch {}
+    setHistoryIndex(-1);
     const selectedObj = availableModels.find((m) => m.id === selectedModel);
-    onDispatch(prompt.trim(), selectedModel, attachedFiles, selectedObj?.provider);
+    onDispatch(trimmed, selectedModel, attachedFiles, selectedObj?.provider, selectedMode);
     setPrompt('');
     setAttachedFiles([]);
     setMentionOpen(false);
@@ -494,6 +569,26 @@ export const InputBar: React.FC<InputBarProps> = ({
             className="flex-1 bg-transparent px-3 py-1 text-sm text-[#e3e3e3] placeholder-[#8e918f] focus:outline-none resize-none max-h-32 leading-relaxed"
           />
 
+          {/* Quick Copy Input Button */}
+          {prompt.trim().length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(prompt);
+                setCopiedInput(true);
+                setTimeout(() => setCopiedInput(false), 2000);
+              }}
+              className="p-2 text-zinc-400 hover:text-white rounded-full hover:bg-[#282a2c] transition-colors shrink-0"
+              title="Copy input text"
+            >
+              {copiedInput ? (
+                <Check className="w-4 h-4 text-emerald-400" />
+              ) : (
+                <Copy className="w-4 h-4" />
+              )}
+            </button>
+          )}
+
           {/* Prompt Enhancer Button */}
           {prompt.trim() && !isLoading && (
             <button
@@ -616,8 +711,51 @@ export const InputBar: React.FC<InputBarProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center space-x-2 text-[11px] font-mono">
-            <span>BYOK Local-First</span>
+          {/* Execution Mode Selector Pills */}
+          <div className="flex items-center space-x-1.5">
+            <div className="flex items-center bg-[#18191b] p-0.5 rounded-full border border-[#282a2c]">
+              <button
+                type="button"
+                onClick={() => setSelectedMode('fast')}
+                className={`flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium transition-all ${
+                  selectedMode === 'fast'
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+                title="Fast Direct mode: Instant LLM response without web search (<3s)"
+              >
+                <Zap className="w-3 h-3 text-emerald-400" />
+                <span>Fast</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedMode('debate')}
+                className={`flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium transition-all ${
+                  selectedMode === 'debate'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+                title="Court Debate Arena: Multi-agent adversarial cross-examination"
+              >
+                <Swords className="w-3 h-3 text-amber-400" />
+                <span>Debate</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedMode('deep_research')}
+                className={`flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium transition-all ${
+                  selectedMode === 'deep_research'
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+                title="Deep Research mode: Web discovery, FTS5 extraction, debate, and citation synthesis"
+              >
+                <Compass className="w-3 h-3 text-cyan-400" />
+                <span>Deep</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>

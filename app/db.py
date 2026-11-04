@@ -8,7 +8,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
+from typing import Generator, Any, Dict, List, Optional
 
 from app.config import DATABASE_PATH, DATA_DIR
 
@@ -89,11 +89,15 @@ def init_db(db_path: Path = DATABASE_PATH) -> None:
             """
         )
 
-        # Migration: ensure parent_run_id column exists on research_runs
+        # Migration: ensure parent_run_id, mode, and context_files_json exist on research_runs
         cursor = conn.execute("PRAGMA table_info(research_runs);")
         run_columns = [row[1] for row in cursor.fetchall()]
         if "parent_run_id" not in run_columns:
             conn.execute("ALTER TABLE research_runs ADD COLUMN parent_run_id TEXT;")
+        if "mode" not in run_columns:
+            conn.execute("ALTER TABLE research_runs ADD COLUMN mode TEXT DEFAULT 'deep_research';")
+        if "context_files_json" not in run_columns:
+            conn.execute("ALTER TABLE research_runs ADD COLUMN context_files_json TEXT DEFAULT '[]';")
 
         # 4. Structured execution event journal for SSE and live timeline replay
         conn.execute(
@@ -359,6 +363,99 @@ def get_db(db_path: Path = DATABASE_PATH) -> Generator[sqlite3.Connection, None,
         yield conn
     finally:
         conn.close()
+
+
+def search_evidence_fts(
+    run_id: str,
+    query: str,
+    limit: int = 6,
+    db_path: Path = DATABASE_PATH,
+) -> List[Dict[str, Any]]:
+    """Executes a BM25 ranked lexical full-text search across indexed evidence chunks for a specific research run."""
+    import re
+
+    clean_tokens = [re.sub(r"[^\w]", "", t).strip() for t in query.split() if len(t) > 2]
+    clean_tokens = [t for t in clean_tokens if t][:8]
+    if not clean_tokens:
+        with get_db(db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT c.id, c.content, s.domain, s.url, s.title
+                FROM evidence_chunks c
+                JOIN sources s ON c.source_id = s.id
+                WHERE c.run_id = ?
+                ORDER BY c.created_at ASC
+                LIMIT ?;
+                """,
+                (run_id, limit),
+            ).fetchall()
+            return [
+                {
+                    "chunk_id": r["id"],
+                    "domain": r["domain"],
+                    "url": r["url"],
+                    "title": r["title"] or r["domain"],
+                    "snippet": r["content"][:280],
+                    "content": r["content"],
+                }
+                for r in rows
+            ]
+
+    match_expr = " OR ".join(f'"{token}"*' for token in clean_tokens)
+
+    with get_db(db_path) as conn:
+        try:
+            rows = conn.execute(
+                """
+                SELECT c.id, c.content, s.domain, s.url, s.title, fts.rank
+                FROM evidence_chunks_fts fts
+                JOIN evidence_chunks c ON fts.id = c.id
+                JOIN sources s ON c.source_id = s.id
+                WHERE c.run_id = ? AND evidence_chunks_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?;
+                """,
+                (run_id, match_expr, limit),
+            ).fetchall()
+
+            if rows:
+                return [
+                    {
+                        "chunk_id": r["id"],
+                        "domain": r["domain"],
+                        "url": r["url"],
+                        "title": r["title"] or r["domain"],
+                        "snippet": r["content"][:280],
+                        "content": r["content"],
+                    }
+                    for r in rows
+                ]
+        except Exception as e:
+            print(f"[FTS5] Search syntax warning: {e}")
+
+        # Fallback to recent chunks for this run
+        fallback_rows = conn.execute(
+            """
+            SELECT c.id, c.content, s.domain, s.url, s.title
+            FROM evidence_chunks c
+            JOIN sources s ON c.source_id = s.id
+            WHERE c.run_id = ?
+            ORDER BY c.created_at ASC
+            LIMIT ?;
+            """,
+            (run_id, limit),
+        ).fetchall()
+        return [
+            {
+                "chunk_id": r["id"],
+                "domain": r["domain"],
+                "url": r["url"],
+                "title": r["title"] or r["domain"],
+                "snippet": r["content"][:280],
+                "content": r["content"],
+            }
+            for r in fallback_rows
+        ]
 
 
 if __name__ == "__main__":

@@ -24,9 +24,9 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from app.config import DEFAULT_ENDPOINT_URL, DEFAULT_MODEL
-from app.db import get_db, init_db
+from app.db import get_db, init_db, search_evidence_fts
 from app.export.exporter import export_to_html, export_to_json_dossier, export_to_markdown
-from app.fetch.web_fetcher import fetch_and_index_url
+from app.fetch.web_fetcher import fetch_and_index_url, ingest_local_file
 from app.providers.base import ModelMessage
 from app.providers.openai_compat import OpenAICompatibleProvider
 from app.search.engine import execute_web_search
@@ -58,6 +58,7 @@ class RunDispatchReq(BaseModel):
     endpoint: Optional[str] = None
     context_files: Optional[List[str]] = []
     parent_run_id: Optional[str] = None
+    mode: Optional[str] = "deep_research"
 
 
 class PromptEnhanceReq(BaseModel):
@@ -168,8 +169,10 @@ def create_app() -> FastAPI:
 
     # ==================== Providers & BYOK Vault API ====================
     @app.get("/api/vault/providers", response_class=JSONResponse)
+    @app.get("/api/vault/keys", response_class=JSONResponse)
     async def api_list_providers():
-        return {"providers": list_vault_keys()}
+        keys = list_vault_keys()
+        return {"providers": keys, "keys": keys}
 
     @app.post("/api/vault/providers", response_class=JSONResponse)
     async def api_save_provider(req: ProviderSaveReq):
@@ -453,14 +456,14 @@ def create_app() -> FastAPI:
         with get_db() as conn:
             conn.execute(
                 """
-                INSERT INTO research_runs (id, title, prompt, status, parent_run_id)
-                VALUES (?, ?, ?, 'running', ?);
+                INSERT INTO research_runs (id, title, prompt, status, parent_run_id, mode, context_files_json)
+                VALUES (?, ?, ?, 'running', ?, ?, ?);
                 """,
-                (run_id, title, req.prompt, req.parent_run_id),
+                (run_id, title, req.prompt, req.parent_run_id, req.mode or "deep_research", json.dumps(req.context_files or [])),
             )
             conn.commit()
 
-        return {"ok": True, "run_id": run_id, "title": title}
+        return {"ok": True, "run_id": run_id, "title": title, "mode": req.mode or "deep_research"}
 
     @app.post("/api/runs/{run_id}/abort", response_class=JSONResponse)
     async def abort_run(run_id: str):
@@ -487,6 +490,7 @@ def create_app() -> FastAPI:
             report = ""
             thoughts = ""
             event_list = []
+            debate_list = []
             for ev in events:
                 try:
                     payload = json.loads(ev["payload_json"])
@@ -494,6 +498,8 @@ def create_app() -> FastAPI:
                     if ev["event_type"] == "synthesized_report":
                         report = payload.get("report", "")
                         thoughts = payload.get("thoughts", "")
+                    elif ev["event_type"] == "debate_turn":
+                        debate_list.append(payload)
                 except Exception:
                     pass
 
@@ -519,17 +525,17 @@ def create_app() -> FastAPI:
 
         fmt = format.lower()
         if fmt in ("md", "markdown"):
-            md_content = export_to_markdown(dict(run), report, thoughts, evidence_list)
+            md_content = export_to_markdown(dict(run), report, thoughts, evidence_list, debate=debate_list)
             return Response(
                 content=md_content,
                 media_type="text/markdown",
                 headers={"Content-Disposition": f'attachment; filename="research-{run_id}.md"'},
             )
         elif fmt == "html":
-            html_content = export_to_html(dict(run), report, thoughts, evidence_list)
+            html_content = export_to_html(dict(run), report, thoughts, evidence_list, debate=debate_list)
             return HTMLResponse(content=html_content)
         elif fmt == "json":
-            json_dossier = export_to_json_dossier(dict(run), report, thoughts, event_list, evidence_list)
+            json_dossier = export_to_json_dossier(dict(run), report, thoughts, event_list, evidence_list, debate=debate_list)
             return JSONResponse(
                 content=json_dossier,
                 headers={"Content-Disposition": f'attachment; filename="research-dossier-{run_id}.json"'},
@@ -652,20 +658,30 @@ def create_app() -> FastAPI:
 
         ACTIVE_RUNS[run_id] = {"aborted": False}
         parent_context = ""
+        run_mode = "deep_research"
+        context_files_list: List[str] = []
         with get_db() as conn:
             run_data = conn.execute("SELECT * FROM research_runs WHERE id = ?", (run_id,)).fetchone()
-            if run_data and "parent_run_id" in run_data.keys() and run_data["parent_run_id"]:
-                p_run_id = run_data["parent_run_id"]
-                p_rep = conn.execute(
-                    "SELECT payload_json FROM run_events WHERE run_id = ? AND event_type = 'synthesized_report' ORDER BY id DESC LIMIT 1;",
-                    (p_run_id,),
-                ).fetchone()
-                if p_rep:
+            if run_data:
+                if "mode" in run_data.keys() and run_data["mode"]:
+                    run_mode = run_data["mode"]
+                if "context_files_json" in run_data.keys() and run_data["context_files_json"]:
                     try:
-                        p_obj = json.loads(p_rep["payload_json"])
-                        parent_context = p_obj.get("report", "")
+                        context_files_list = json.loads(run_data["context_files_json"])
                     except Exception:
-                        parent_context = p_rep["payload_json"]
+                        context_files_list = []
+                if "parent_run_id" in run_data.keys() and run_data["parent_run_id"]:
+                    p_run_id = run_data["parent_run_id"]
+                    p_rep = conn.execute(
+                        "SELECT payload_json FROM run_events WHERE run_id = ? AND event_type = 'synthesized_report' ORDER BY id DESC LIMIT 1;",
+                        (p_run_id,),
+                    ).fetchone()
+                    if p_rep:
+                        try:
+                            p_obj = json.loads(p_rep["payload_json"])
+                            parent_context = p_obj.get("report", "")
+                        except Exception:
+                            parent_context = p_rep["payload_json"]
 
         async def event_generator() -> AsyncGenerator[str, None]:
             step_idx = 1
@@ -676,22 +692,126 @@ def create_app() -> FastAPI:
                 yield json.dumps({"type": "status", "status": "aborted", "message": "Research aborted by user."})
                 return
 
-            # ==================== Step 1: Real SubAgent - Planner ====================
-            yield json.dumps({
-                "type": "subagent",
-                "name": "planner",
-                "action": f"Formulating research breakdown and queries for '{prompt[:45]}...'",
-                "role": "Lead Research Architect",
-                "inspector": {
-                    "title": "SubAgent: Planner",
-                    "role": "Lead Research Architect",
-                    "status": "running",
-                    "prompt": f"System: Deconstruct research request '{prompt}' into targeted search queries.\nUser: {prompt}",
-                    "thought": f"Analyzing user research objective: '{prompt}'. Deconstructing into specific factual, contextual, and comparative search vectors.",
-                    "fetches": [{"type": "plan_scope", "detail": f"Prompt: {prompt[:60]}"}],
-                    "verdict": "Generating structured web search plan..."
+            # ==================== Step 0: Ingest Uploaded Context Files into FTS5 ====================
+            if context_files_list:
+                for cf in context_files_list:
+                    fpath = UPLOADS_DIR / Path(cf).name
+                    if not fpath.exists():
+                        fpath = Path(cf)
+                    if fpath.exists() and fpath.is_file():
+                        ingested = ingest_local_file(fpath, run_id)
+                        for chk in ingested:
+                            gathered_chunks.append(chk)
+                            yield json.dumps({
+                                "type": "evidence",
+                                "chunk_id": chk["chunk_id"],
+                                "domain": chk["domain"],
+                                "snippet": chk["snippet"],
+                            })
+
+                file_skill_payload = {
+                    "type": "skill",
+                    "name": "file-ingest",
+                    "action": f"Indexed {len(context_files_list)} uploaded reference file(s) into SQLite FTS5",
+                    "category": "Files",
+                    "inspector": {
+                        "title": "Skill: Local File Ingest & FTS5 Indexing",
+                        "files_attached": [Path(cf).name for cf in context_files_list],
+                        "execution_log": f"Indexed {len(gathered_chunks)} chunks into SQLite FTS5 for BM25 retrieval.",
+                        "status": "completed",
+                    },
                 }
-            })
+                yield json.dumps(file_skill_payload)
+                with get_db() as conn:
+                    conn.execute(
+                        "INSERT INTO run_events (run_id, step, agent_role, event_type, payload_json) VALUES (?, ?, 'FILE_INGEST', 'skill', ?);",
+                        (run_id, step_idx, json.dumps(file_skill_payload)),
+                    )
+                    conn.commit()
+                step_idx += 1
+
+            # ==================== Fast Mode Bypass ====================
+            if run_mode == "fast":
+                yield json.dumps({
+                    "type": "subagent",
+                    "name": "synthesizer",
+                    "action": f"Direct stream generation for '{prompt[:45]}...'",
+                    "role": "Direct Synthesizer",
+                    "color": "#10b981",
+                    "inspector": {
+                        "title": "Mode: Fast Direct Synthesis",
+                        "role": "Direct Synthesizer",
+                        "status": "running",
+                        "prompt": prompt,
+                        "thought": "Processing request in Fast Direct mode. Synthesizing response immediately.",
+                        "verdict": "Streaming tokens directly...",
+                    },
+                })
+
+                file_context = ""
+                local_fts = search_evidence_fts(run_id, prompt, limit=4)
+                if local_fts:
+                    file_context = "\n\n### Uploaded Reference Excerpts:\n" + "\n---\n".join([f"Source: {c['title']}\n{c['content']}" for c in local_fts])
+
+                fast_messages = [
+                    ModelMessage(
+                        role="system",
+                        content=(
+                            "You are an expert AI researcher and assistant. Synthesize a direct, high-quality, "
+                            "and clear Markdown response with code blocks, tables, and structured headers as appropriate."
+                            + (f"\n\nPrior Context:\n{parent_context}" if parent_context else "")
+                        ),
+                    ),
+                    ModelMessage(role="user", content=f"{prompt}{file_context}"),
+                ]
+                full_text = []
+                full_thought = []
+                async for chunk_type, chunk in llm_provider.stream_structured(messages=fast_messages, model=target_model, max_tokens=1500):
+                    if ACTIVE_RUNS.get(run_id, {}).get("aborted"):
+                        yield json.dumps({"type": "status", "status": "aborted", "message": "Research aborted by user."})
+                        break
+                    if chunk_type == "thought":
+                        full_thought.append(chunk)
+                        yield json.dumps({"type": "thought", "delta": chunk})
+                    else:
+                        full_text.append(chunk)
+                        yield json.dumps({"type": "token", "delta": chunk})
+
+                complete_report = "".join(full_text)
+                with get_db() as conn:
+                    conn.execute(
+                        "INSERT INTO run_events (run_id, step, agent_role, event_type, payload_json) VALUES (?, ?, 'SYNTHESIZER', 'synthesized_report', ?);",
+                        (run_id, step_idx, json.dumps({"report": complete_report, "thoughts": "".join(full_thought)})),
+                    )
+                    conn.execute("UPDATE research_runs SET status = 'completed', completed_at = CURRENT_TIMESTAMP WHERE id = ?", (run_id,))
+                    conn.commit()
+
+                yield json.dumps({
+                    "type": "status",
+                    "status": "completed",
+                    "run_id": run_id,
+                    "mode": "fast",
+                    "message": "Fast synthesis complete.",
+                })
+                return
+
+            if run_mode == "deep_research":
+                # ==================== Step 1: Real SubAgent - Planner ====================
+                yield json.dumps({
+                    "type": "subagent",
+                    "name": "planner",
+                    "action": f"Formulating research breakdown and queries for '{prompt[:45]}...'",
+                    "role": "Lead Research Architect",
+                    "inspector": {
+                        "title": "SubAgent: Planner",
+                        "role": "Lead Research Architect",
+                        "status": "running",
+                        "prompt": f"System: Deconstruct research request '{prompt}' into targeted search queries.\nUser: {prompt}",
+                        "thought": f"Analyzing user research objective: '{prompt}'. Deconstructing into specific factual, contextual, and comparative search vectors.",
+                        "fetches": [{"type": "plan_scope", "detail": f"Prompt: {prompt[:60]}"}],
+                        "verdict": "Generating structured web search plan..."
+                    }
+                })
 
             # Call real LLM to generate targeted search queries
             plan_text = ""
@@ -888,7 +1008,9 @@ def create_app() -> FastAPI:
             step_idx += 1
 
             # ==================== Step 4: Multi-Agent Adversarial Debate Arena ====================
-            evidence_summary = "\n---\n".join([f"Source: {c['domain']}\nSnippet: {c['snippet']}" for c in gathered_chunks[:4]])
+            fts_debate_chunks = search_evidence_fts(run_id, prompt, limit=6)
+            debate_evidence_pool = fts_debate_chunks if fts_debate_chunks else gathered_chunks[:6]
+            evidence_summary = "\n---\n".join([f"Source: {c['domain']}\nSnippet: {c['snippet']}" for c in debate_evidence_pool[:4]]) if debate_evidence_pool else "No external web sources retrieved; relying on core reasoning principles."
 
             yield json.dumps({
                 "type": "subagent",
@@ -902,7 +1024,7 @@ def create_app() -> FastAPI:
                     "status": "running",
                     "prompt": f"Audit research question '{prompt}' through structured multi-agent debate.",
                     "thought": "Proposer and Skeptic engaging in cross-examination; Adjudicator formulating consensus.",
-                    "fetches": [{"type": "audit_target", "detail": f"{len(gathered_chunks)} evidence chunks"}],
+                    "fetches": [{"type": "audit_target", "detail": f"{len(debate_evidence_pool)} BM25 FTS5 evidence chunks"}],
                     "verdict": "Debating evidence in real-time..."
                 }
             })
@@ -1304,13 +1426,17 @@ def create_app() -> FastAPI:
             extra_custom = ("\n\n" + "\n\n".join(custom_findings)) if custom_findings else ""
             parent_note = f"\n\nPrior Research Synthesis Context (Follow-up):\n{parent_context[:1200]}\n" if parent_context else ""
 
+            fts_editor_chunks = search_evidence_fts(run_id, prompt, limit=8)
+            editor_evidence_pool = fts_editor_chunks if fts_editor_chunks else gathered_chunks[:8]
+            editor_evidence_summary = "\n---\n".join([f"Source: {c['domain']}\nSnippet: {c['snippet']}" for c in editor_evidence_pool]) if editor_evidence_pool else evidence_summary
+
             debate_summary_text = "\n\n".join([
                 f"- [{t['speakerName']}]: {t['content']}" for t in debate_turns_data
             ])
             editor_prompt = (
                 f"Research Request: {prompt}\n\n"
                 f"{parent_note}"
-                f"Real Web Evidence Gathered:\n{evidence_summary}\n\n"
+                f"Verified FTS5 Evidence Gathered:\n{editor_evidence_summary}\n\n"
                 f"Multi-Agent Adversarial Debate Record:\n{debate_summary_text}\n\n"
                 f"Adjudication Ruling:\n{m_content}"
                 f"{extra_custom}\n\n"

@@ -1,12 +1,15 @@
+export type ResearchMode = 'fast' | 'debate' | 'deep_research';
+
 export interface ResearchRun {
   id: string;
   title: string;
   prompt: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'aborted';
   created_at: string;
   completed_at?: string;
   tokens_used?: number;
   estimated_cost?: number;
+  mode?: ResearchMode;
 }
 
 export interface ModelItem {

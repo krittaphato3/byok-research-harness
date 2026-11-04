@@ -6,6 +6,7 @@ import type {
   SubAgentEvent,
   SkillEvent,
   DebateMessage,
+  ResearchMode,
 } from '../types';
 import type { TelemetryStats } from '../components/TelemetryHUD';
 
@@ -34,6 +35,7 @@ export function useResearchStream() {
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const runStartTimeRef = useRef<number>(0);
+  const generationStartTimeRef = useRef<number>(0);
   const tokenCountRef = useRef<number>(0);
 
   // Smooth streaming token queue
@@ -48,11 +50,17 @@ export function useResearchStream() {
       timer = setInterval(() => {
         if (runStartTimeRef.current > 0) {
           const elapsed = (Date.now() - runStartTimeRef.current) / 1000;
-          setTelemetry((prev) => ({
-            ...prev,
-            elapsedSeconds: elapsed,
-            tokensPerSec: elapsed > 0 ? prev.tokensUsed / elapsed : 0,
-          }));
+          setTelemetry((prev) => {
+            const activeGenSecs = generationStartTimeRef.current > 0 ? (Date.now() - generationStartTimeRef.current) / 1000 : 0;
+            const tps = activeGenSecs > 0.5
+              ? Math.round((prev.tokensUsed / activeGenSecs) * 10) / 10
+              : (elapsed > 0 ? Math.round((prev.tokensUsed / elapsed) * 10) / 10 : 0);
+            return {
+              ...prev,
+              elapsedSeconds: elapsed,
+              tokensPerSec: tps,
+            };
+          });
         }
       }, 300);
     }
@@ -156,7 +164,8 @@ export function useResearchStream() {
       model: string,
       attachedFiles: AttachedFile[] = [],
       provider?: string,
-      parentRunId?: string | null
+      parentRunId?: string | null,
+      mode: ResearchMode = 'deep_research'
     ) => {
       setIsLoading(true);
       setIsThinking(false);
@@ -170,10 +179,18 @@ export function useResearchStream() {
       setError(null);
 
       runStartTimeRef.current = Date.now();
+      generationStartTimeRef.current = 0;
       tokenCountRef.current = 0;
 
+      const initialStage =
+        mode === 'fast'
+          ? 'Fast Direct Synthesis'
+          : mode === 'debate'
+          ? 'Adversarial Court Debate Arena'
+          : 'Formulating Research Plan';
+
       setTelemetry({
-        stage: 'Formulating Research Plan',
+        stage: initialStage,
         tokensUsed: 0,
         tokensPerSec: 0,
         elapsedSeconds: 0,
@@ -191,6 +208,7 @@ export function useResearchStream() {
             prompt,
             model,
             provider,
+            mode,
             context_files: attachedFiles.map((f) => f.name),
             parent_run_id: parentRunId || undefined,
           }),
@@ -320,6 +338,9 @@ export function useResearchStream() {
               setIsThinking(true);
               enqueueThoughtToken(payload.delta);
             } else if (payload.type === 'token') {
+              if (generationStartTimeRef.current === 0) {
+                generationStartTimeRef.current = Date.now();
+              }
               setIsThinking(false);
               setIsDebating(false);
               enqueueContentToken(payload.delta);

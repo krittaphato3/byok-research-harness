@@ -25,6 +25,7 @@ dist/
 tests/sample_research_doc.txt
 tests/*.png
 graphify-out/
+.zcode/
 
 # OS metadata
 .DS_Store

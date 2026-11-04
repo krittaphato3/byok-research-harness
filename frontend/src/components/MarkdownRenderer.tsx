@@ -14,6 +14,39 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   className = '',
   onCitationClick,
 }) => {
+  const renderWithCitations = (children: React.ReactNode) => {
+    return React.Children.map(children, (child) => {
+      if (typeof child === 'string') {
+        const parts = child.split(/(\[\d+(?:,\s*\d+)*\]|\[Source\s*\d+\]|\[chk_[a-zA-Z0-9_-]+\])/g);
+        if (parts.length > 1) {
+          return parts.map((part, pIdx) => {
+            const isCitation = /^(\[\d+(?:,\s*\d+)*\]|\[Source\s*\d+\]|\[chk_[a-zA-Z0-9_-]+\])$/.test(part);
+            if (isCitation) {
+              return (
+                <button
+                  key={pIdx}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onCitationClick) {
+                      onCitationClick(part);
+                    }
+                  }}
+                  className="inline-flex items-center px-1.5 py-0.2 mx-0.5 rounded-full bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-700/60 text-cyan-300 font-mono text-[11px] font-semibold transition-all hover:scale-105 cursor-pointer shadow-sm"
+                  title={`View verified evidence chunk for ${part}`}
+                >
+                  {part}
+                </button>
+              );
+            }
+            return part;
+          });
+        }
+      }
+      return child;
+    });
+  };
+
   return (
     <div className={`markdown-body text-[#e3e3e3] leading-relaxed text-sm select-text ${className}`}>
       <ReactMarkdown
@@ -40,44 +73,11 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               {children}
             </h4>
           ),
-          p: ({ children }) => {
-            // Process children to detect citation patterns like [1], [2], [Source 1]
-            return (
-              <p className="mb-3 leading-relaxed text-zinc-300 text-sm">
-                {React.Children.map(children, (child) => {
-                  if (typeof child === 'string') {
-                    // Match citations like [1], [2], [1, 2], [Source 1]
-                    const parts = child.split(/(\[\d+(?:,\s*\d+)*\]|\[Source\s*\d+\])/g);
-                    if (parts.length > 1) {
-                      return parts.map((part, pIdx) => {
-                        const isCitation = /^(\[\d+(?:,\s*\d+)*\]|\[Source\s*\d+\])$/.test(part);
-                        if (isCitation) {
-                          return (
-                            <button
-                              key={pIdx}
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (onCitationClick) {
-                                  onCitationClick(part);
-                                }
-                              }}
-                              className="inline-flex items-center px-1.5 py-0.2 mx-0.5 rounded-full bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-700/60 text-cyan-300 font-mono text-[11px] font-semibold transition-all hover:scale-105 cursor-pointer shadow-sm"
-                              title={`View evidence source for ${part}`}
-                            >
-                              {part}
-                            </button>
-                          );
-                        }
-                        return part;
-                      });
-                    }
-                  }
-                  return child;
-                })}
-              </p>
-            );
-          },
+          p: ({ children }) => (
+            <p className="mb-3 leading-relaxed text-zinc-300 text-sm">
+              {renderWithCitations(children)}
+            </p>
+          ),
           strong: ({ children }) => (
             <strong className="font-bold text-white tracking-wide">
               {children}
@@ -100,7 +100,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           ),
           li: ({ children }) => (
             <li className="pl-1 leading-relaxed">
-              {children}
+              {renderWithCitations(children)}
             </li>
           ),
           blockquote: ({ children }) => (
@@ -159,7 +159,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
           ),
           td: ({ children }) => (
             <td className="px-4 py-2.5 whitespace-normal leading-relaxed text-zinc-300">
-              {children}
+              {renderWithCitations(children)}
             </td>
           ),
           pre: ({ children }) => (

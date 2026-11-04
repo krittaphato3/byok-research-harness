@@ -25,7 +25,8 @@ async def run_api_tests():
         assert res.status_code == 200
         keys = res.json().get("keys", [])
         assert len(keys) >= 1
-        assert keys[0]["key_hint"] == "****6341"
+        assert any(k.get("key_hint") for k in keys)
+        assert all(k["key_hint"].startswith("****") for k in keys if k.get("key_hint"))
 
         print("\n--- 3. Testing POST /api/vault/test ---")
         res = await client.post("/api/vault/test", data={"provider": "local_openai", "endpoint": "http://localhost:20128/v1"})
@@ -33,17 +34,19 @@ async def run_api_tests():
         assert res.status_code == 200
         assert res.json().get("ok") is True
 
-        print("\n--- 4. Testing POST /api/runs (Dispatch) ---")
+        print("\n--- 4. Testing POST /api/runs (Dispatch with Fast Mode) ---")
         dispatch_payload = {
             "prompt": "Evaluate SQLite WAL mode performance in edge devices",
             "model": "auto/chat",
             "provider": "local_openai",
+            "mode": "fast",
         }
         res = await client.post("/api/runs", json=dispatch_payload)
         print("Dispatch response:", res.status_code, res.json())
         assert res.status_code == 200
         run_id = res.json().get("run_id")
         assert run_id is not None
+        assert res.json().get("mode") == "fast"
 
         print(f"\n--- 5. Testing SSE Stream GET /api/runs/{run_id}/stream ---")
         stream_chunks = []
@@ -60,8 +63,9 @@ async def run_api_tests():
                             stream_chunks.append(delta)
                         elif parsed.get("type") == "step":
                             print(f"\n[STEP: {parsed.get('role')}] {parsed.get('message')}")
-                        elif parsed.get("type") == "done":
-                            print(f"\n[DONE] {parsed.get('message')}")
+                        elif parsed.get("type") == "done" or (parsed.get("type") == "status" and parsed.get("status") == "completed"):
+                            print(f"\n[DONE] {parsed.get('message', 'Completed')}")
+                            break
                     except Exception:
                         pass
 

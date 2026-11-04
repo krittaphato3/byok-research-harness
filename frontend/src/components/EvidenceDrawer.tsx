@@ -16,6 +16,8 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
   selectedChunkId,
 }) => {
   const [filterText, setFilterText] = useState('');
+  const [selectedDomain, setSelectedDomain] = useState<string>('all');
+  const [expandedChunks, setExpandedChunks] = useState<{ [id: string]: boolean }>({});
   const itemRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
 
   useEffect(() => {
@@ -26,7 +28,14 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
 
   if (!isOpen) return null;
 
+  const uniqueDomains = Array.from(new Set(evidence.map((e) => e.domain).filter(Boolean)));
+
+  const toggleExpand = (id: string) => {
+    setExpandedChunks((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
   const filtered = evidence.filter((item) => {
+    if (selectedDomain !== 'all' && item.domain !== selectedDomain) return false;
     if (!filterText.trim()) return true;
     const query = filterText.toLowerCase();
     return (
@@ -59,8 +68,8 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
         </button>
       </div>
 
-      {/* Quick Search */}
-      <div className="px-3 pt-3 pb-1 border-b border-[#242629]">
+      {/* Quick Search & Domain Filter Chips */}
+      <div className="px-3 pt-3 pb-2 border-b border-[#242629] space-y-2">
         <div className="relative">
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-zinc-400" />
           <input
@@ -79,12 +88,43 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
             </button>
           )}
         </div>
+
+        {uniqueDomains.length > 1 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px] scrollbar-none">
+            <button
+              type="button"
+              onClick={() => setSelectedDomain('all')}
+              className={`px-2 py-0.5 rounded-full whitespace-nowrap transition-colors ${
+                selectedDomain === 'all'
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                  : 'bg-[#222427] text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              All ({evidence.length})
+            </button>
+            {uniqueDomains.map((domain) => (
+              <button
+                key={domain}
+                type="button"
+                onClick={() => setSelectedDomain(domain)}
+                className={`px-2 py-0.5 rounded-full whitespace-nowrap transition-colors ${
+                  selectedDomain === domain
+                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40'
+                    : 'bg-[#222427] text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                {domain}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Chunks List */}
       <div className="flex-1 overflow-y-auto p-3 space-y-2.5 font-mono text-xs select-text">
         {filtered.map((item, idx) => {
           const isSelected = selectedChunkId === item.chunk_id;
+          const isExpanded = Boolean(expandedChunks[item.chunk_id]);
           return (
             <div
               key={idx}
@@ -113,9 +153,19 @@ export const EvidenceDrawer: React.FC<EvidenceDrawerProps> = ({
                 </div>
               )}
 
-              <p className="text-zinc-300 text-xs leading-relaxed font-sans line-clamp-4">
+              <p className={`text-zinc-300 text-xs leading-relaxed font-sans ${isExpanded ? '' : 'line-clamp-4'}`}>
                 "{item.snippet}"
               </p>
+
+              {item.snippet.length > 120 && (
+                <button
+                  type="button"
+                  onClick={() => toggleExpand(item.chunk_id)}
+                  className="text-[10px] text-cyan-400 hover:text-cyan-300 font-sans cursor-pointer underline"
+                >
+                  {isExpanded ? 'Collapse excerpt' : 'Expand full excerpt'}
+                </button>
+              )}
 
               <div className="flex items-center justify-between pt-1 text-[10px]">
                 <span className="text-emerald-400 font-mono">

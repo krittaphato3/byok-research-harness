@@ -22,8 +22,9 @@ import type {
   AttachedFile,
   SubAgentEvent,
   SkillEvent,
+  ResearchMode,
 } from './types';
-import { Sparkles, Layers, Sliders, Bot, Wand2 } from 'lucide-react';
+import { Sparkles, Layers, Sliders, Bot, Wand2, Copy, Check, Edit3 } from 'lucide-react';
 
 const FALLBACK_MODELS: ModelOption[] = [
   { id: 'auto/qwen', name: 'auto/qwen', provider: 'localhost', providerLabel: 'Localhost', tags: ['1M', 'Fast'] },
@@ -42,6 +43,8 @@ export function App() {
   const [isSkillsOpen, setIsSkillsOpen] = useState(false);
   const [inspectedEvent, setInspectedEvent] = useState<SubAgentEvent | SkillEvent | null>(null);
   const [selectedChunkId, setSelectedChunkId] = useState<string | null>(null);
+  const [editablePrompt, setEditablePrompt] = useState<string | null>(null);
+  const [promptCopied, setPromptCopied] = useState(false);
 
   const [selectedModel, setSelectedModel] = useState('auto/qwen');
   const [selectedProvider, setSelectedProvider] = useState<string | undefined>('localhost');
@@ -68,6 +71,7 @@ export function App() {
   } = useResearchStream();
 
   const handleCitationClick = (citation: string, url?: string) => {
+    setInspectedEvent(null);
     const match = citation.match(/\[(\d+)\]/);
     if (match) {
       const idx = parseInt(match[1], 10) - 1;
@@ -137,6 +141,7 @@ export function App() {
   }, []);
 
   const handleSuggestionClick = (prompt: string) => {
+    setEditablePrompt(null);
     startStream(prompt, selectedModel, [], selectedProvider);
   };
 
@@ -149,9 +154,11 @@ export function App() {
     prompt: string,
     model: string,
     files: AttachedFile[],
-    provider?: string
+    provider?: string,
+    mode?: ResearchMode
   ) => {
-    startStream(prompt, model, files, provider || selectedProvider, currentRunId);
+    setEditablePrompt(null);
+    startStream(prompt, model, files, provider || selectedProvider, currentRunId, mode);
   };
 
   return (
@@ -292,10 +299,38 @@ export function App() {
           ) : (
             /* Active Chat & Agent Stream */
             <div className="space-y-6 w-full max-w-3xl mx-auto pb-24">
-              {/* User Prompt Bubble */}
-              <div className="flex items-start justify-end">
-                <div className="max-w-xl bg-[#282a2c] text-white px-4 py-2.5 rounded-3xl text-sm leading-relaxed shadow-sm">
-                  {currentPrompt}
+              {/* User Prompt Bubble with Copy & Edit Quick Actions */}
+              <div className="flex items-start justify-end group">
+                <div className="relative max-w-xl bg-[#282a2c] text-white px-4 py-2.5 rounded-3xl text-sm leading-relaxed shadow-sm border border-[#3c4043]/50">
+                  <div className="pr-14 break-words">{currentPrompt}</div>
+                  <div className="absolute top-2 right-2 flex items-center space-x-1 opacity-70 group-hover:opacity-100 transition-opacity">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (currentPrompt) {
+                          navigator.clipboard.writeText(currentPrompt);
+                          setPromptCopied(true);
+                          setTimeout(() => setPromptCopied(false), 2000);
+                        }
+                      }}
+                      className="p-1 text-zinc-400 hover:text-white hover:bg-[#3c4043] rounded-full transition-colors"
+                      title="Copy prompt"
+                    >
+                      {promptCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (currentPrompt) {
+                          setEditablePrompt(currentPrompt);
+                        }
+                      }}
+                      className="p-1 text-zinc-400 hover:text-cyan-300 hover:bg-[#3c4043] rounded-full transition-colors"
+                      title="Edit / re-run prompt"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -320,7 +355,10 @@ export function App() {
                         <SubAgentChip
                           key={idx}
                           event={evt}
-                          onClick={() => setInspectedEvent(evt)}
+                          onClick={() => {
+                            setIsEvidenceOpen(false);
+                            setInspectedEvent(evt);
+                          }}
                         />
                       );
                     }
@@ -329,7 +367,10 @@ export function App() {
                         <SkillChip
                           key={idx}
                           event={evt}
-                          onClick={() => setInspectedEvent(evt)}
+                          onClick={() => {
+                            setIsEvidenceOpen(false);
+                            setInspectedEvent(evt);
+                          }}
                         />
                       );
                     }
@@ -338,6 +379,7 @@ export function App() {
                         <div
                           key={idx}
                           onClick={() => {
+                            setInspectedEvent(null);
                             setSelectedChunkId(evt.chunk_id);
                             setIsEvidenceOpen(true);
                           }}
@@ -409,9 +451,13 @@ export function App() {
           onAbort={abortStream}
           selectedModel={selectedModel}
           onModelChange={handleModelChange}
-          onToggleEvidence={() => setIsEvidenceOpen((prev) => !prev)}
+          onToggleEvidence={() => {
+            setInspectedEvent(null);
+            setIsEvidenceOpen((prev) => !prev);
+          }}
           availableModels={availableModels}
           parentRunId={currentRunId}
+          externalPrompt={editablePrompt}
         />
       </main>
 
