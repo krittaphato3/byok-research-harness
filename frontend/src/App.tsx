@@ -138,7 +138,40 @@ export function App() {
 
   useEffect(() => {
     fetchProvidersAndModels();
+
+    // Gemini-style path parsing on mount: /app/<chat_id>
+    const pathname = window.location.pathname;
+    const match = pathname.match(/^\/app\/([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) {
+      loadRunHistory(match[1]);
+    } else {
+      // Fallback support for query parameter ?cid= or ?c=
+      const params = new URLSearchParams(window.location.search);
+      const queryCid = params.get('cid') || params.get('c');
+      if (queryCid) {
+        loadRunHistory(queryCid);
+      }
+    }
   }, []);
+
+  // Browser Back/Forward history navigation handling
+  useEffect(() => {
+    const handlePopState = () => {
+      const pathname = window.location.pathname;
+      const match = pathname.match(/^\/app\/([a-zA-Z0-9_-]+)/);
+      if (match && match[1]) {
+        const targetId = match[1];
+        if (currentRunId !== targetId && currentRunId !== `run_${targetId}`) {
+          loadRunHistory(targetId);
+        }
+      } else if (pathname === '/app' || pathname === '/') {
+        resetChat();
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [currentRunId, loadRunHistory, resetChat]);
 
   const handleSuggestionClick = (prompt: string) => {
     setEditablePrompt(null);
@@ -173,8 +206,11 @@ export function App() {
         onOpenSkills={() => setIsSkillsOpen(true)}
         onToggleEvidence={() => setIsEvidenceOpen((prev) => !prev)}
         runs={runs}
+        currentRunId={currentRunId}
         onSelectRun={(run) => {
-          loadRunHistory(run.id);
+          if (currentRunId !== run.id && currentRunId?.replace(/^run_/, '') !== run.id.replace(/^run_/, '')) {
+            loadRunHistory(run.id);
+          }
         }}
       />
 

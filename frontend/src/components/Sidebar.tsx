@@ -22,6 +22,7 @@ interface SidebarProps {
   onToggleEvidence: () => void;
   runs: ResearchRun[];
   onSelectRun: (run: ResearchRun) => void;
+  currentRunId?: string | null;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -34,6 +35,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleEvidence,
   runs,
   onSelectRun,
+  currentRunId,
 }) => {
   const [isLogoHovered, setIsLogoHovered] = useState(false);
 
@@ -252,15 +254,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Search className="w-3.5 h-3.5 hover:text-white cursor-pointer" />
             </div>
             <div className="flex-1 overflow-y-auto space-y-0.5 text-xs">
-              {runs.map((run) => (
-                <div
-                  key={run.id}
-                  onClick={() => onSelectRun(run)}
-                  className="px-3 py-2 rounded-lg hover:bg-[#282a2c] cursor-pointer text-[#e3e3e3] hover:text-white truncate transition-colors"
-                >
-                  {run.title}
-                </div>
-              ))}
+              {runs.map((run) => {
+                const isActive =
+                  currentRunId === run.id ||
+                  (Boolean(currentRunId) &&
+                    currentRunId?.replace(/^run_/, '') === run.id.replace(/^run_/, ''));
+                return (
+                  <div
+                    key={run.id}
+                    onClick={() => onSelectRun(run)}
+                    className={`px-3 py-2 rounded-lg cursor-pointer truncate transition-all text-xs flex items-center justify-between ${
+                      isActive
+                        ? 'bg-[#282a2c] text-white font-medium border-l-2 border-cyan-400'
+                        : 'text-[#e3e3e3] hover:bg-[#1e1f20] hover:text-white'
+                    }`}
+                  >
+                    <span className="truncate">{run.title}</span>
+                  </div>
+                );
+              })}
               {runs.length === 0 && (
                 <div className="p-3 text-center text-[#8e918f] text-xs">
                   No recent runs.

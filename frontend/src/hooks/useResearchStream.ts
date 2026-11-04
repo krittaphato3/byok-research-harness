@@ -219,6 +219,13 @@ export function useResearchStream() {
         const runId = data.run_id;
         setCurrentRunId(runId);
 
+        // Update URL path to match Gemini format: /app/<chat_id>
+        const cleanId = runId.replace(/^run_/, '');
+        const targetPath = `/app/${cleanId}`;
+        if (window.location.pathname !== targetPath) {
+          window.history.pushState({ cid: runId }, '', targetPath);
+        }
+
         // 2. Open SSE stream
         if (eventSourceRef.current) {
           eventSourceRef.current.close();
@@ -432,6 +439,9 @@ export function useResearchStream() {
       chunksCount: 0,
       status: 'idle',
     });
+    if (window.location.pathname !== '/app' && window.location.pathname !== '/') {
+      window.history.pushState({}, '', '/app');
+    }
   }, [flushQueueImmediately]);
 
   const loadRunHistory = useCallback(
@@ -447,11 +457,19 @@ export function useResearchStream() {
         const res = await fetch(`/api/runs/${runId}`);
         const data = await res.json();
         if (data.ok) {
+          const canonicalId = data.run.id;
           setCurrentPrompt(data.run.prompt);
-          setCurrentRunId(runId);
+          setCurrentRunId(canonicalId);
           setStreamedContent(data.report || '');
           setStreamedThoughts(data.thoughts || '');
           setEvidenceItems(data.evidence || []);
+
+          // Sync URL to /app/<chat_id> like Gemini
+          const cleanId = canonicalId.replace(/^run_/, '');
+          const targetPath = `/app/${cleanId}`;
+          if (window.location.pathname !== targetPath) {
+            window.history.replaceState({ cid: canonicalId }, '', targetPath);
+          }
 
           const loadedEvents: TimelineEvent[] = [];
           if (data.events && Array.isArray(data.events)) {
@@ -499,9 +517,14 @@ export function useResearchStream() {
             chunksCount: (data.evidence || []).length,
             status: 'completed',
           });
+        } else {
+          throw new Error(data.detail || 'Chat session not found');
         }
       } catch (err: any) {
         setError(err.message || 'Failed to load run history');
+        if (window.location.pathname.startsWith('/app/')) {
+          window.history.replaceState({}, '', '/app');
+        }
       } finally {
         setIsLoading(false);
       }

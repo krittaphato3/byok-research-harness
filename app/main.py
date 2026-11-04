@@ -145,7 +145,9 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/", response_class=HTMLResponse)
-    async def index(request: Request):
+    @app.get("/app", response_class=HTMLResponse)
+    @app.get("/app/{chat_id}", response_class=HTMLResponse)
+    async def index(request: Request, chat_id: Optional[str] = None):
         if (FRONTEND_DIST / "index.html").exists():
             return FileResponse(FRONTEND_DIST / "index.html")
 
@@ -387,13 +389,17 @@ def create_app() -> FastAPI:
     async def get_run_details(run_id: str):
         """Retrieves a historical research run with its full synthesized report, events, and evidence without rerunning."""
         with get_db() as conn:
-            run = conn.execute("SELECT * FROM research_runs WHERE id = ?;", (run_id,)).fetchone()
+            run = conn.execute(
+                "SELECT * FROM research_runs WHERE id = ? OR id = ? LIMIT 1;",
+                (run_id, f"run_{run_id}"),
+            ).fetchone()
             if not run:
                 raise HTTPException(status_code=404, detail="Run not found.")
+            actual_run_id = run["id"]
 
             # Events
             raw_events = conn.execute(
-                "SELECT * FROM run_events WHERE run_id = ? ORDER BY step ASC, created_at ASC;", (run_id,)
+                "SELECT * FROM run_events WHERE run_id = ? ORDER BY step ASC, created_at ASC;", (actual_run_id,)
             ).fetchall()
 
             events = []
@@ -425,7 +431,7 @@ def create_app() -> FastAPI:
                 JOIN sources s ON c.source_id = s.id
                 WHERE c.run_id = ?;
                 """,
-                (run_id,),
+                (actual_run_id,),
             ).fetchall()
             evidence_list = [
                 {
@@ -480,12 +486,16 @@ def create_app() -> FastAPI:
     @app.get("/api/runs/{run_id}/export/{format}")
     async def export_run(run_id: str, format: str):
         with get_db() as conn:
-            run = conn.execute("SELECT * FROM research_runs WHERE id = ?", (run_id,)).fetchone()
+            run = conn.execute(
+                "SELECT * FROM research_runs WHERE id = ? OR id = ? LIMIT 1;",
+                (run_id, f"run_{run_id}"),
+            ).fetchone()
             if not run:
                 raise HTTPException(status_code=404, detail="Run not found.")
+            actual_run_id = run["id"]
 
             events = conn.execute(
-                "SELECT * FROM run_events WHERE run_id = ? ORDER BY step ASC", (run_id,)
+                "SELECT * FROM run_events WHERE run_id = ? ORDER BY step ASC", (actual_run_id,)
             ).fetchall()
             report = ""
             thoughts = ""
@@ -510,7 +520,7 @@ def create_app() -> FastAPI:
                 JOIN sources s ON c.source_id = s.id
                 WHERE c.run_id = ?;
                 """,
-                (run_id,),
+                (actual_run_id,),
             ).fetchall()
             evidence_list = [
                 {
@@ -611,9 +621,13 @@ def create_app() -> FastAPI:
         endpoint: Optional[str] = None,
     ):
         with get_db() as conn:
-            run = conn.execute("SELECT * FROM research_runs WHERE id = ?", (run_id,)).fetchone()
+            run = conn.execute(
+                "SELECT * FROM research_runs WHERE id = ? OR id = ? LIMIT 1;",
+                (run_id, f"run_{run_id}"),
+            ).fetchone()
             if not run:
                 raise HTTPException(status_code=404, detail="Run not found.")
+            run_id = run["id"]
             prompt = run["prompt"]
 
         # Parse active provider or fallback to default

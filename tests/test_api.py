@@ -72,6 +72,18 @@ async def run_api_tests():
         print(f"\nTotal streamed token chunks received: {len(stream_chunks)}")
         assert len(stream_chunks) > 0, "No streamed tokens received from local endpoint"
 
+        print(f"\n--- 6. Testing GET /app and /app/{run_id} Routing & Resolution ---")
+        clean_id = run_id.replace("run_", "")
+        res_app_root = await client.get("/app")
+        assert res_app_root.status_code == 200
+
+        res_app_id = await client.get(f"/app/{clean_id}")
+        assert res_app_id.status_code == 200
+
+        res_details_clean = await client.get(f"/api/runs/{clean_id}")
+        assert res_details_clean.status_code == 200
+        assert res_details_clean.json()["run"]["id"] == run_id
+
     print("\nALL END-TO-END TESTS PASSED.")
 
 
