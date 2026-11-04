@@ -11,6 +11,9 @@ import { SkillsModal } from './components/SkillsModal';
 import { AgentInspectorDrawer } from './components/AgentInspectorDrawer';
 import { ThinkingBlock } from './components/ThinkingBlock';
 import { MarkdownRenderer } from './components/MarkdownRenderer';
+import { ReportExportBar } from './components/ReportExportBar';
+import { TelemetryHUD } from './components/TelemetryHUD';
+import { DebateChatLog } from './components/DebateChatLog';
 import { useResearchStream } from './hooks/useResearchStream';
 import type {
   ResearchRun,
@@ -38,6 +41,7 @@ export function App() {
   const [isSubagentsOpen, setIsSubagentsOpen] = useState(false);
   const [isSkillsOpen, setIsSkillsOpen] = useState(false);
   const [inspectedEvent, setInspectedEvent] = useState<SubAgentEvent | SkillEvent | null>(null);
+  const [selectedChunkId, setSelectedChunkId] = useState<string | null>(null);
 
   const [selectedModel, setSelectedModel] = useState('auto/qwen');
   const [selectedProvider, setSelectedProvider] = useState<string | undefined>('localhost');
@@ -47,16 +51,44 @@ export function App() {
   const {
     isLoading,
     isThinking,
+    isDebating,
     currentPrompt,
+    currentRunId,
     timelineEvents,
+    debateTurns,
     streamedContent,
     streamedThoughts,
     evidenceItems,
     error,
+    telemetry,
     startStream,
+    abortStream,
     resetChat,
     loadRunHistory,
   } = useResearchStream();
+
+  const handleCitationClick = (citation: string, url?: string) => {
+    const match = citation.match(/\[(\d+)\]/);
+    if (match) {
+      const idx = parseInt(match[1], 10) - 1;
+      if (evidenceItems[idx]) {
+        setSelectedChunkId(evidenceItems[idx].chunk_id);
+        setIsEvidenceOpen(true);
+        return;
+      }
+    }
+    if (url) {
+      const matched = evidenceItems.find(
+        (e) => e.url === url || (e.domain && url.includes(e.domain))
+      );
+      if (matched) {
+        setSelectedChunkId(matched.chunk_id);
+        setIsEvidenceOpen(true);
+        return;
+      }
+    }
+    setIsEvidenceOpen(true);
+  };
 
   const fetchProvidersAndModels = async () => {
     try {
@@ -119,7 +151,7 @@ export function App() {
     files: AttachedFile[],
     provider?: string
   ) => {
-    startStream(prompt, model, files, provider || selectedProvider);
+    startStream(prompt, model, files, provider || selectedProvider, currentRunId);
   };
 
   return (
@@ -267,6 +299,11 @@ export function App() {
                 </div>
               </div>
 
+              {/* Real-time Telemetry HUD */}
+              {telemetry.status !== 'idle' && (
+                <TelemetryHUD stats={telemetry} onAbort={abortStream} />
+              )}
+
               {/* Agent Execution Flow */}
               <div className="space-y-3">
                 <div className="flex items-center space-x-2 text-xs text-[#8e918f] pb-1">
@@ -300,7 +337,11 @@ export function App() {
                       return (
                         <div
                           key={idx}
-                          className="p-3 bg-[#1e1f20] border border-[#3c4043] rounded-xl text-xs space-y-1"
+                          onClick={() => {
+                            setSelectedChunkId(evt.chunk_id);
+                            setIsEvidenceOpen(true);
+                          }}
+                          className="p-3 bg-[#1e1f20] border border-[#3c4043] hover:border-cyan-400/60 rounded-xl text-xs space-y-1 cursor-pointer transition-colors"
                         >
                           <div className="flex items-center justify-between text-[#8e918f]">
                             <span className="font-mono text-[10px] text-[#a8c7fa]">
@@ -317,6 +358,11 @@ export function App() {
                 </div>
               </div>
 
+              {/* Multi-Agent Adversarial Debate Arena */}
+              {(debateTurns.length > 0 || isDebating) && (
+                <DebateChatLog debateTurns={debateTurns} isDebating={isDebating} />
+              )}
+
               {/* Reliable Streaming Thinking Process Module */}
               <ThinkingBlock thoughts={streamedThoughts} isStreaming={isThinking} />
 
@@ -332,7 +378,17 @@ export function App() {
                       </span>
                     </div>
 
-                    <MarkdownRenderer content={streamedContent} />
+                    <MarkdownRenderer
+                      content={streamedContent}
+                      onCitationClick={handleCitationClick}
+                    />
+
+                    {/* Multi-Format Export Engine */}
+                    <ReportExportBar
+                      runId={currentRunId}
+                      content={streamedContent}
+                      evidenceCount={evidenceItems.length}
+                    />
                   </div>
               )}
 
@@ -350,10 +406,12 @@ export function App() {
         <InputBar
           onDispatch={handleDispatch}
           isLoading={isLoading}
+          onAbort={abortStream}
           selectedModel={selectedModel}
           onModelChange={handleModelChange}
           onToggleEvidence={() => setIsEvidenceOpen((prev) => !prev)}
           availableModels={availableModels}
+          parentRunId={currentRunId}
         />
       </main>
 
@@ -362,6 +420,7 @@ export function App() {
         isOpen={isEvidenceOpen}
         onClose={() => setIsEvidenceOpen(false)}
         evidence={evidenceItems}
+        selectedChunkId={selectedChunkId}
       />
 
       {/* 5. SubAgent / Skill Inspector Drawer */}

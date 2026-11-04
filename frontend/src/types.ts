@@ -97,6 +97,7 @@ export interface SubAgentEvent {
   name: string;
   action: string;
   role?: string;
+  color?: string;
   inspector?: AgentInspectorData;
 }
 
@@ -128,10 +129,24 @@ export interface SkillItem {
   is_enabled: boolean | number;
 }
 
+export interface DebateMessage {
+  id: string;
+  round: number;
+  speaker: 'proposer' | 'skeptic' | 'moderator';
+  speakerName: string;
+  speakerRole: string;
+  avatarColor: string;
+  content: string;
+  timestamp: string;
+  status: 'streaming' | 'completed';
+}
+
 export interface EvidenceItem {
   chunk_id: string;
   domain: string;
   snippet: string;
+  title?: string;
+  url?: string;
   bm25_score?: number;
 }
 

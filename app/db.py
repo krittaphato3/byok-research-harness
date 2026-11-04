@@ -89,6 +89,12 @@ def init_db(db_path: Path = DATABASE_PATH) -> None:
             """
         )
 
+        # Migration: ensure parent_run_id column exists on research_runs
+        cursor = conn.execute("PRAGMA table_info(research_runs);")
+        run_columns = [row[1] for row in cursor.fetchall()]
+        if "parent_run_id" not in run_columns:
+            conn.execute("ALTER TABLE research_runs ADD COLUMN parent_run_id TEXT;")
+
         # 4. Structured execution event journal for SSE and live timeline replay
         conn.execute(
             """

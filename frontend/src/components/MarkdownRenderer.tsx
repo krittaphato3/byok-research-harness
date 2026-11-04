@@ -1,14 +1,19 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, ExternalLink } from 'lucide-react';
 
 interface MarkdownRendererProps {
   content: string;
   className?: string;
+  onCitationClick?: (citation: string, url?: string) => void;
 }
 
-export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, className = '' }) => {
+export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
+  content,
+  className = '',
+  onCitationClick,
+}) => {
   return (
     <div className={`markdown-body text-[#e3e3e3] leading-relaxed text-sm select-text ${className}`}>
       <ReactMarkdown
@@ -35,11 +40,44 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
               {children}
             </h4>
           ),
-          p: ({ children }) => (
-            <p className="mb-3 leading-relaxed text-zinc-300 text-sm">
-              {children}
-            </p>
-          ),
+          p: ({ children }) => {
+            // Process children to detect citation patterns like [1], [2], [Source 1]
+            return (
+              <p className="mb-3 leading-relaxed text-zinc-300 text-sm">
+                {React.Children.map(children, (child) => {
+                  if (typeof child === 'string') {
+                    // Match citations like [1], [2], [1, 2], [Source 1]
+                    const parts = child.split(/(\[\d+(?:,\s*\d+)*\]|\[Source\s*\d+\])/g);
+                    if (parts.length > 1) {
+                      return parts.map((part, pIdx) => {
+                        const isCitation = /^(\[\d+(?:,\s*\d+)*\]|\[Source\s*\d+\])$/.test(part);
+                        if (isCitation) {
+                          return (
+                            <button
+                              key={pIdx}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (onCitationClick) {
+                                  onCitationClick(part);
+                                }
+                              }}
+                              className="inline-flex items-center px-1.5 py-0.2 mx-0.5 rounded-full bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-700/60 text-cyan-300 font-mono text-[11px] font-semibold transition-all hover:scale-105 cursor-pointer shadow-sm"
+                              title={`View evidence source for ${part}`}
+                            >
+                              {part}
+                            </button>
+                          );
+                        }
+                        return part;
+                      });
+                    }
+                  }
+                  return child;
+                })}
+              </p>
+            );
+          },
           strong: ({ children }) => (
             <strong className="font-bold text-white tracking-wide">
               {children}
@@ -73,16 +111,25 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
           hr: () => (
             <hr className="my-6 border-[#282a2c]" />
           ),
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-cyan-400 hover:text-cyan-300 underline underline-offset-4 font-medium transition-colors"
-            >
-              {children}
-            </a>
-          ),
+          a: ({ href, children }) => {
+            const isExternal = href?.startsWith('http://') || href?.startsWith('https://');
+            return (
+              <a
+                href={href}
+                target={isExternal ? '_blank' : undefined}
+                rel={isExternal ? 'noopener noreferrer' : undefined}
+                onClick={() => {
+                  if (onCitationClick && href) {
+                    onCitationClick(String(children), href);
+                  }
+                }}
+                className="inline-flex items-center gap-1 text-cyan-400 hover:text-cyan-300 underline underline-offset-4 font-medium transition-colors cursor-pointer"
+              >
+                <span>{children}</span>
+                {isExternal && <ExternalLink className="w-3 h-3 inline-block opacity-70" />}
+              </a>
+            );
+          },
           table: ({ children }) => (
             <div className="overflow-x-auto my-4 border border-[#3c4043] rounded-2xl shadow-md bg-[#161718]">
               <table className="min-w-full divide-y divide-[#282a2c] text-xs font-sans">
@@ -101,32 +148,44 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, cla
             </th>
           ),
           tbody: ({ children }) => (
-            <tbody className="divide-y divide-[#242628] bg-[#141517]">
+            <tbody className="divide-y divide-[#282a2c] text-zinc-300">
               {children}
             </tbody>
           ),
+          tr: ({ children }) => (
+            <tr className="hover:bg-[#1d1e20] transition-colors">
+              {children}
+            </tr>
+          ),
           td: ({ children }) => (
-            <td className="px-4 py-2.5 text-zinc-300">
+            <td className="px-4 py-2.5 whitespace-normal leading-relaxed text-zinc-300">
               {children}
             </td>
           ),
-          code: ({ inline, className, children }: any) => {
-            const match = /language-(\w+)/.exec(className || '');
+          pre: ({ children }) => (
+            <div className="relative my-4 rounded-2xl overflow-hidden border border-[#3c4043] bg-[#0d0e0f] shadow-lg">
+              {children}
+            </div>
+          ),
+          code: ({ inline, className: codeClassName, children, ...props }: any) => {
+            const match = /language-(\w+)/.exec(codeClassName || '');
             const lang = match ? match[1] : '';
             const codeString = String(children).replace(/\n$/, '');
 
             if (inline) {
               return (
-                <code className="px-1.5 py-0.5 rounded-md bg-[#242628] text-cyan-300 font-mono text-xs border border-[#3c4043]">
+                <code className="px-1.5 py-0.5 rounded-md bg-[#242629] text-amber-300 font-mono text-xs border border-[#383a3d]">
                   {children}
                 </code>
               );
             }
 
             return (
-              <CodeBlock language={lang} code={codeString}>
-                {children}
-              </CodeBlock>
+              <CodeBlockWithCopy language={lang} code={codeString}>
+                <code className={`block p-4 font-mono text-xs text-zinc-200 overflow-x-auto ${codeClassName || ''}`} {...props}>
+                  {children}
+                </code>
+              </CodeBlockWithCopy>
             );
           },
         }}
@@ -143,7 +202,7 @@ interface CodeBlockProps {
   children: React.ReactNode;
 }
 
-const CodeBlock: React.FC<CodeBlockProps> = ({ language, code, children }) => {
+const CodeBlockWithCopy: React.FC<CodeBlockProps> = ({ language, code, children }) => {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -151,42 +210,34 @@ const CodeBlock: React.FC<CodeBlockProps> = ({ language, code, children }) => {
       await navigator.clipboard.writeText(code);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (e) {
-      console.error('Failed to copy code', e);
+    } catch {
+      // Fallback
     }
   };
 
   return (
-    <div className="relative rounded-2xl border border-[#3c4043] bg-[#121314] my-4 overflow-hidden shadow-lg group">
-      {/* Code Header Bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-[#1a1b1d] border-b border-[#282a2c] text-xs text-zinc-400 font-mono">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
-          {language || 'code'}
-        </span>
+    <div>
+      <div className="flex items-center justify-between px-4 py-2 bg-[#17181a] border-b border-[#282a2c] text-[11px] font-mono text-zinc-400">
+        <span className="uppercase tracking-wider">{language || 'text'}</span>
         <button
-          type="button"
           onClick={handleCopy}
-          className="flex items-center space-x-1 px-2 py-1 rounded-md hover:bg-[#282a2c] text-zinc-400 hover:text-white transition-colors"
-          title="Copy code to clipboard"
+          className="flex items-center space-x-1.5 px-2 py-1 rounded-md hover:bg-[#282a2c] text-zinc-400 hover:text-white transition-colors"
+          title="Copy code"
         >
           {copied ? (
             <>
               <Check className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-[11px] text-emerald-400">Copied!</span>
+              <span className="text-emerald-400 font-sans">Copied</span>
             </>
           ) : (
             <>
               <Copy className="w-3.5 h-3.5" />
-              <span className="text-[11px]">Copy</span>
+              <span className="font-sans">Copy</span>
             </>
           )}
         </button>
       </div>
-
-      {/* Code Body */}
-      <pre className="p-4 overflow-x-auto text-xs text-zinc-200 font-mono leading-relaxed bg-[#101112]">
-        {children}
-      </pre>
+      {children}
     </div>
   );
 };
